@@ -1,0 +1,9 @@
+{
+  "name": "simrts-demo",
+  "private": true,
+  "scripts": {
+    "compile": "node tools/compile.js",
+    "compile:open": "node tools/compile.js -open",
+    "compile:hot": "node tools/compile.js --hot"
+  }
+}

@@ -1,0 +1,13 @@
+ xcodebuild -downloadComponent MetalToolchain
+- This installs something for unreal to use in a Mac
+
+/Users/Shared/Epic Games/UE_5.6/Engine/Config/Apple/Apple_SDK.json
+- Here need to update llvm and max Xcode version
+
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+ sudo xcodebuild -license accept
+- These accept license
+
+Install cursor plugin
+markdown preview mermaid support
+Helps with plan files

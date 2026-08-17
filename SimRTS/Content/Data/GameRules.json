@@ -1,0 +1,21 @@
+{
+	"ticks_per_second": 30,
+	"unit_defs": [
+		{
+			"type": "Soldier",
+			"speed": 30,
+			"diameter": 10,
+			"weight": 1,
+			"sparse_goals": true,
+			"idle_push": true
+		},
+		{
+			"type": "Vehicle",
+			"speed": 20,
+			"diameter": 30,
+			"weight": 100,
+			"sparse_goals": true,
+			"idle_push": true
+		}
+	]
+}

@@ -1,0 +1,70 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Node (compile helper)
+node_modules/
+
+# IDEs / editors
+.idea/
+.vs/
+.vsconfig
+.vscode/
+*.user
+*.DotSettings.user
+
+# Unreal Engine generated folders (any directory level)
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+FileOpenOrder/
+Build/
+
+# Unreal-generated IDE projects
+*.xcodeproj
+*.xcworkspace
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# Compiled objects and libraries
+*.slo
+*.lo
+*.o
+*.obj
+*.gch
+*.pch
+*.so
+*.dylib
+*.dll
+*.mod
+*.lai
+*.la
+*.a
+*.lib
+*.exe
+*.out
+*.app
+*.ipa
+*.pdb
+*.dSYM/
+
+# Cooked / packed
+*.pak
+*.ucas
+*.utoc
+*_BuiltData.uasset
+
+# Python
+__pycache__/
+*.pyc
+
+# Backups
+*~
+*.bak

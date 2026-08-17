@@ -1,0 +1,76 @@
+This project is an Unreal 5.6.1 RTS game Simulator.
+
+## Modules
+
+**RTSEngine** — pure C++ sim core (STL / data-only OOP). No Unreal gameplay types in sim sources.
+Deterministic tick engine: each step applies pending orders, advances movement, then increments the tick. No reverse/undo history.
+
+**SimRTS** — Unreal game module. Display (unit actors), input (selection, orders), HUD, level JSON I/O, and bridge into RTSEngine.
+
+**SimRTSEditor** — Editor-only module. Tools menu → **SimRTS Level Bake...**: bake placed obstruction actors (`ASimRTSObstructionVolume` box, `ASimRTSObstructionCylinderVolume` circle) into the level `obstruction` string, and editor-only spawn markers (`ASimRTSSpawnMarker`) into the spawns JSON.
+
+## Level configuration (JSON)
+
+Level rules and starting state live **outside compiled code** in JSON under:
+
+`SimRTS/Content/Data/Levels/DefaultLevel.json`
+
+Document shape:
+
+- `world` — discrete `width` / `height`, and required `ticks_per_second` (from JSON → engine static data; Unreal timer = `1 / ticks_per_second`)
+- `obstruction` — single `'0'`/`'1'` string of length `width * height` (no separators). Index `i` → `x = i % width`, `y = i / width`. `'0'` walkable, `'1'` blocked. Loaded once into a static 2D `PathingGrid` of `GridCell`; the string is not retained.
+- `unit_defs` — `Soldier` / `Vehicle`: `speed` (discrete **points per second**), `radius`
+- `spawns` — starting units (`id`, `type`, `x`, `y`, optional `rotation`)
+
+Flow:
+
+1. **SimRTS** (`LevelLoader` + Unreal `Json` module) reads/parses the file into an RTSEngine `Level`
+2. `FSimBridge` passes that `Level` into `TickEngine::LoadLevel`
+3. RTSEngine stays free of JSON — it only consumes the structured `Level`
+
+Editing the JSON changes the level without recompiling C++ (restart Play / reload level). There is no code-built fallback level — a missing or invalid JSON fails level load. `Content/Data` is staged for packaged builds via `DefaultGame.ini`.
+
+## Simulation model
+
+World uses discrete integer points (e.g. 1000×1000). With `GridScale = 10` UU (1 dm per point), **speed 10 ≈ 1 m/s**.
+
+### Movement (straight-line segments)
+
+A Move order stores an active **`UnitMove` on the unit**: start `A`, end `B`, `start_tick`.
+
+Each tick:
+
+1. Elapsed seconds = `(tick - start_tick) / ticks_per_second`
+2. Points traveled = `speed * elapsed_seconds` along the Euclidean segment `A → B`
+3. Float position along that segment is **snapped** to the nearest integer grid point
+4. On arrival (`points_traveled >= |B-A|`), position becomes `B` and the move clears
+
+On submit, **`FindMoveWaypoints`** plans the route: if line-of-sight is clear, one segment; otherwise 8-neighbor **A\*** around blocked cells, then **LOS-safe compression** into fewer Euclidean waypoints (each skipped shortcut must pass `HasLineOfSight` / clamp). Unreachable goals fall back to the closest reachable free cell. Those waypoints are enqueued as move / `is_next` segments.
+
+Before each segment starts, **`ClampMoveDestination`** still walks the lerp+round cells with a fixed 0.5-point step (speed-independent) and shortens the end if needed.
+
+Each unit runs at most one active move. Pending orders in `BattleState.orders` are scanned front-to-back:
+
+- **`is_next = false`** (normal right-click): clears that unit’s active move and any pending orders for it, then applies immediately on the next apply pass.
+- **`is_next = true`** (shift+right-click): appended; applied only when the unit has no active move (waypoint chain / multiline path foundation).
+
+`StepForward` applies orders, advances movement, then applies again so a finished segment can start the next `is_next` waypoint in the same tick.
+
+Float/double is used only for the in-tick lerp; persisted unit position stays integer. (True bit-identical netcode / reverse ticks are future work.)
+
+**Static battle data** (from level JSON): world size, ticks_per_second, unit definitions, pathing grid (from `obstruction`).
+
+**Live battle data**: units (id, type, position, rotation, active move) and pending orders (`is_next` waypoints retained until applied or cancelled).
+
+## Unreal display / input
+
+Unreal syncs actor transforms to sim unit positions each sim tick.
+Selection is Unreal-only. Ordering converts world hit → grid → `SubmitMoveOrder` into RTSEngine (shift held → `is_next`).
+Unit types map to display actors via `UUnitViewManager` (e.g. soldier cylinder, vehicle cube).
+
+## First foundation (status)
+
+- Discrete world + Soldier / Vehicle defs
+- Forward-only tick engine with straight-line moves, A* pathfinding, and `is_next` waypoint chains
+- JSON level load → seed + level bake tool (obstructions + spawns)
+- Unit actors, debug HUD, click select, right-click move / shift+right-click queue
