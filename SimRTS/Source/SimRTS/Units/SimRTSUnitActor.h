@@ -29,6 +29,9 @@ public:
 
 	virtual void SyncWorldPose(const FVector& GroundLocation, float YawDegrees, bool bIsMoving);
 
+	/** Display-only: this unit was the pinned (infinite-mass) side of an idle-push pair. */
+	virtual void NotifyPinnedPush();
+
 	void SetSelected(bool bSelected);
 
 	int32 GetUnitId() const { return UnitId; }

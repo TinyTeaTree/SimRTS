@@ -25,6 +25,9 @@ struct Unit {
     // |pressure| is clamped to one point so fractional shares can carry across ticks.
     int32_t push_pressure_x = 0;
     int32_t push_pressure_y = 0;
+    // Display-only: true for the tick this idle unit is the blocked (infinite-mass)
+    // side of an idle-push pair. Engine never reads this for rules.
+    bool push_pinned_visual = false;
 };
 
 } // namespace SimRTS

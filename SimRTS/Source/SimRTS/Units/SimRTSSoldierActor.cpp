@@ -4,6 +4,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -68,6 +70,17 @@ ASimRTSSoldierActor::ASimRTSSoldierActor()
 	if (RunFinder.Succeeded())
 	{
 		RunAnim = RunFinder.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> PushedFinder(
+		TEXT("/Game/Characters/Mannequins/Anims/Rifle/HitReact/MM_HitReact_Front_Lgt_01.MM_HitReact_Front_Lgt_01"));
+	if (PushedFinder.Succeeded())
+	{
+		PushedAnim = PushedFinder.Object;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("ASimRTSSoldierActor: failed to load MM_HitReact_Front_Lgt_01"));
 	}
 
 	ApplyCharacterDefaults();
@@ -183,12 +196,22 @@ float ASimRTSSoldierActor::GetPivotHeight() const
 
 void ASimRTSSoldierActor::OnMovingChanged(bool bIsMoving)
 {
+	if (bPushAnimLocked)
+	{
+		return;
+	}
+
 	PlayLocomotion(bIsMoving);
+}
+
+void ASimRTSSoldierActor::NotifyPinnedPush()
+{
+	PlayPushedAnim();
 }
 
 void ASimRTSSoldierActor::PlayLocomotion(bool bIsMoving)
 {
-	if (CharacterMesh == nullptr)
+	if (bPushAnimLocked || CharacterMesh == nullptr)
 	{
 		return;
 	}
@@ -200,4 +223,43 @@ void ASimRTSSoldierActor::PlayLocomotion(bool bIsMoving)
 	}
 
 	CharacterMesh->PlayAnimation(Anim, /*bLooping=*/true);
+}
+
+void ASimRTSSoldierActor::PlayPushedAnim()
+{
+	if (bPushAnimLocked || CharacterMesh == nullptr)
+	{
+		return;
+	}
+
+	UAnimSequence* Anim = PushedAnim.Get();
+	if (Anim == nullptr)
+	{
+		return;
+	}
+
+	CharacterMesh->PlayAnimation(Anim, /*bLooping=*/false);
+	bPushAnimLocked = true;
+
+	const float Duration = FMath::Max(Anim->GetPlayLength(), 0.05f);
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			PushAnimTimer,
+			this,
+			&ASimRTSSoldierActor::OnPushAnimFinished,
+			Duration,
+			false);
+	}
+	else
+	{
+		OnPushAnimFinished();
+	}
+}
+
+void ASimRTSSoldierActor::OnPushAnimFinished()
+{
+	bPushAnimLocked = false;
+	PushAnimTimer.Invalidate();
+	PlayLocomotion(bMoving);
 }

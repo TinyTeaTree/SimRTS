@@ -560,6 +560,10 @@ void TickEngine::ApplyIdlePush() {
     // Weighted separation: each overlapping pair contributes 1 point of push split by
     // inverse weight (lighter moves more). Shares accumulate as fixed-point pressure;
     // a unit only steps when |pressure| reaches one point. Walls act as infinite mass.
+    for (Unit& unit : state_.units) {
+        unit.push_pinned_visual = false;
+    }
+
     const int32_t n = static_cast<int32_t>(state_.units.size());
     if (n <= 1) {
         return;
@@ -607,8 +611,14 @@ void TickEngine::ApplyIdlePush() {
                 // Neither can take the separation this tick.
             } else if (a_blocked) {
                 share_b = kPushPressureScale;
+                if (a_receives) {
+                    a.push_pinned_visual = true;
+                }
             } else if (b_blocked) {
                 share_a = kPushPressureScale;
+                if (b_receives) {
+                    b.push_pinned_visual = true;
+                }
             } else {
                 const int32_t weight_a = WeightForUnit(a, static_data_);
                 const int32_t weight_b = WeightForUnit(b, static_data_);

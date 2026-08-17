@@ -444,6 +444,38 @@ int main() {
         }
     }
 
+    // Pinned idle push: unit against the world edge keeps position; peer gets 100% share.
+    {
+        TickEngine pin_engine;
+        Level pin_level = MakeSmokeLevel();
+        pin_level.static_data.unit_defs[static_cast<size_t>(UnitType::Soldier)].idle_push = true;
+        pin_level.static_data.unit_defs[static_cast<size_t>(UnitType::Soldier)].diameter = 10;
+        pin_level.static_data.unit_defs[static_cast<size_t>(UnitType::Soldier)].weight = 1;
+        pin_level.spawns.clear();
+        pin_level.spawns.push_back({1, UnitType::Soldier, {0, 50}, 0});
+        pin_level.spawns.push_back({2, UnitType::Soldier, {0, 50}, 0});
+        pin_engine.LoadLevel(pin_level);
+
+        pin_engine.StepForward();
+        const Unit* free_unit = pin_engine.FindUnit(1);
+        const Unit* pinned_unit = pin_engine.FindUnit(2);
+        if (free_unit == nullptr || pinned_unit == nullptr) {
+            Fail("pinned idle push should spawn both soldiers");
+        }
+        if (pinned_unit->position.x != 0 || pinned_unit->position.y != 50) {
+            Fail("pinned idle push should leave the blocked unit unmoved");
+        }
+        if (!pinned_unit->push_pinned_visual) {
+            Fail("pinned idle push should mark the blocked unit for a display react");
+        }
+        if (free_unit->push_pinned_visual) {
+            Fail("pinned idle push should not mark the free peer for a display react");
+        }
+        if (free_unit->position.x != 1 || free_unit->position.y != 50) {
+            Fail("pinned idle push should give the free peer a full 1-point step");
+        }
+    }
+
     std::printf("OK: line-move + is_next + pathfinding smoke test passed (tick=%d, pos=%d,%d)\n",
                 path_engine.GetTick(),
                 path_engine.FindUnit(1)->position.x,

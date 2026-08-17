@@ -95,6 +95,10 @@ void UUnitViewManager::SyncActors(const ASimRTSGameMode* GameMode) const
 			{
 				const FVector Ground = GameMode->GridToWorld(Unit.position.x, Unit.position.y);
 				Actor->SyncWorldPose(Ground, static_cast<float>(Unit.rotation), Unit.move.active);
+				if (Unit.push_pinned_visual)
+				{
+					Actor->NotifyPinnedPush();
+				}
 			}
 		}
 	}
