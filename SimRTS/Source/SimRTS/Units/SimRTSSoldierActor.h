@@ -22,6 +22,7 @@ public:
 
 	virtual float GetPivotHeight() const override;
 	virtual void SyncWorldPose(const FVector& GroundLocation, float YawDegrees, bool bIsMoving) override;
+	virtual void NotifyPinnedPush() override;
 
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -31,6 +32,8 @@ protected:
 
 	void ApplyCharacterDefaults();
 	void PlayLocomotion(bool bIsMoving);
+	void PlayPushedAnim();
+	void OnPushAnimFinished();
 	void SnapVisualToTarget();
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SimRTS")
@@ -60,8 +63,13 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Character")
 	TObjectPtr<UAnimSequence> RunAnim;
 
+	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Character")
+	TObjectPtr<UAnimSequence> PushedAnim;
+
 private:
 	FVector VisualTargetLocation = FVector::ZeroVector;
 	float VisualTargetYawDegrees = 0.f;
 	bool bVisualPoseInitialized = false;
+	bool bPushAnimLocked = false;
+	FTimerHandle PushAnimTimer;
 };

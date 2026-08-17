@@ -63,6 +63,10 @@ void ASimRTSUnitActor::OnMovingChanged(bool bIsMoving)
 	(void)bIsMoving;
 }
 
+void ASimRTSUnitActor::NotifyPinnedPush()
+{
+}
+
 void ASimRTSUnitActor::SetSelected(bool bSelected)
 {
 	OnSelectionChanged(bSelected);
