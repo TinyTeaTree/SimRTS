@@ -10,9 +10,11 @@ const UPROJECT = path.join(ROOT, 'SimRTS', 'SimRTS.uproject');
 const SOURCE_DIRS = [
   path.join(ROOT, 'SimRTS', 'Source', 'SimRTS'),
   path.join(ROOT, 'SimRTS', 'Source', 'RTSEngine'),
+  path.join(ROOT, 'SimRTS', 'Source', 'RTSComms'),
 ];
 const DYLIB = path.join(ROOT, 'SimRTS', 'Binaries', 'Mac', 'UnrealEditor-SimRTS.dylib');
 const ENGINE_DYLIB = path.join(ROOT, 'SimRTS', 'Binaries', 'Mac', 'UnrealEditor-RTSEngine.dylib');
+const COMMS_DYLIB = path.join(ROOT, 'SimRTS', 'Binaries', 'Mac', 'UnrealEditor-RTSComms.dylib');
 const MODULES = path.join(ROOT, 'SimRTS', 'Binaries', 'Mac', 'UnrealEditor.modules');
 
 const UE_ROOT =
@@ -24,12 +26,12 @@ const EDITOR_QUIT_TIMEOUT_MS = 60_000;
 function usage() {
   console.log(`Usage:
   npm run compile
-  npm run compile:open
+  npm run compile_open
   npm run compile:hot
 
 Compiles SimRTSEditor (Mac Development) for SimRTS.uproject.
 Closes any Unreal Editor instance running SimRTS before building (use --no-close to skip).
-Use compile:open (or pass -open) to launch the project after a successful build + sanity check.
+Use compile_open (or pass -open) to launch the project after a successful build + sanity check.
 Use compile:hot (or pass --hot) to rebuild while the editor stays open (UBT hot-reload).
 
 Flags:
@@ -52,8 +54,8 @@ function newestModuleBinaryMtimeMs() {
   let newestPath = null;
   for (const name of fs.readdirSync(dir)) {
     // Hot reload writes suffixed modules: UnrealEditor-SimRTS-0001.dylib
-    // RTSEngine changes only rebuild UnrealEditor-RTSEngine.dylib — count both.
-    if (!/^UnrealEditor-(SimRTS|RTSEngine)(-\d+)?\.dylib$/i.test(name)) {
+    // RTSEngine / RTSComms changes only rebuild those dylibs — count all three.
+    if (!/^UnrealEditor-(SimRTS|RTSEngine|RTSComms)(-\d+)?\.dylib$/i.test(name)) {
       continue;
     }
     const full = path.join(dir, name);
@@ -210,7 +212,7 @@ if (hot) {
   if (procs.length === 0) {
     fail(
       'Hot compile requires SimRTS Unreal Editor to be running.\n' +
-        '    Open the project first, or use npm run compile / compile:open for a full rebuild.'
+        '    Open the project first, or use npm run compile / compile_open for a full rebuild.'
     );
   }
   console.log(`==> Hot compile (editor open, pids: ${procs.map((p) => p.pid).join(', ')})`);
@@ -265,15 +267,19 @@ if (!fs.existsSync(DYLIB)) {
 if (!fs.existsSync(ENGINE_DYLIB)) {
   fail(`Missing module binary: ${ENGINE_DYLIB}`);
 }
+if (!fs.existsSync(COMMS_DYLIB)) {
+  fail(`Missing module binary: ${COMMS_DYLIB}`);
+}
 if (!fs.existsSync(MODULES)) {
   fail(`Missing modules manifest: ${MODULES}`);
 }
 
 const dylibStat = fs.statSync(DYLIB);
 const engineStat = fs.statSync(ENGINE_DYLIB);
+const commsStat = fs.statSync(COMMS_DYLIB);
 const modulesStat = fs.statSync(MODULES);
 const hotBinary = newestModuleBinaryMtimeMs();
-const effectiveBinaryMtime = Math.max(dylibStat.mtimeMs, engineStat.mtimeMs, hotBinary.mtimeMs);
+const effectiveBinaryMtime = Math.max(dylibStat.mtimeMs, engineStat.mtimeMs, commsStat.mtimeMs, hotBinary.mtimeMs);
 const rebuiltDuringThisRun = effectiveBinaryMtime >= buildStartedAt - 5_000;
 const modulesTouched = modulesStat.mtimeMs >= buildStartedAt - 5_000;
 const { newest, newestPath } = newestSourceMtimeMs();
@@ -283,10 +289,11 @@ const binaryCoversSources = newest === 0 || effectiveBinaryMtime + 2_000 >= newe
 console.log(`    dylib   : ${DYLIB}`);
 console.log(`    mtime   : ${formatTime(dylibStat.mtime)}`);
 console.log(`    size    : ${dylibStat.size} bytes`);
-if (hotBinary.path && hotBinary.path !== DYLIB && hotBinary.path !== ENGINE_DYLIB) {
+if (hotBinary.path && hotBinary.path !== DYLIB && hotBinary.path !== ENGINE_DYLIB && hotBinary.path !== COMMS_DYLIB) {
   console.log(`    hot dylib: ${hotBinary.path} (${formatTime(new Date(hotBinary.mtimeMs))})`);
 }
 console.log(`    engine  : ${ENGINE_DYLIB} (${formatTime(engineStat.mtime)}, ${engineStat.size} bytes)`);
+console.log(`    comms   : ${COMMS_DYLIB} (${formatTime(commsStat.mtime)}, ${commsStat.size} bytes)`);
 console.log(`    modules : ${MODULES} (${formatTime(modulesStat.mtime)})`);
 if (newestPath) {
   console.log(`    newest source : ${path.relative(ROOT, newestPath)} (${formatTime(new Date(newest))})`);
@@ -299,6 +306,9 @@ if (dylibStat.size < 50_000) {
 if (engineStat.size < 10_000) {
   fail(`UnrealEditor-RTSEngine.dylib looks suspiciously small (${engineStat.size} bytes).`);
 }
+if (commsStat.size < 10_000) {
+  fail(`UnrealEditor-RTSComms.dylib looks suspiciously small (${commsStat.size} bytes).`);
+}
 
 if (rebuiltDuringThisRun) {
   console.log(hot ? '    OK: hot module binary was produced by this compile.' : '    OK: module binary was rebuilt by this compile.');
@@ -310,7 +320,7 @@ if (rebuiltDuringThisRun) {
   console.log('    OK: binary is at least as new as current sources.');
 } else if (hot) {
   fail(
-    `Hot compile finished, but no updated SimRTS/RTSEngine module binary was detected.\n` +
+    `Hot compile finished, but no updated SimRTS/RTSEngine/RTSComms module binary was detected.\n` +
       `    Tip: use the editor Compile button, or npm run compile (full rebuild with editor closed).`
   );
 } else {
@@ -318,6 +328,7 @@ if (rebuiltDuringThisRun) {
     `Module binaries are older than sources.\n` +
       `    SimRTS dylib mtime    = ${formatTime(dylibStat.mtime)}\n` +
       `    RTSEngine dylib mtime = ${formatTime(engineStat.mtime)}\n` +
+      `    RTSComms dylib mtime  = ${formatTime(commsStat.mtime)}\n` +
       `    newest source = ${newestPath ? path.relative(ROOT, newestPath) : '?'} (${formatTime(new Date(newest))})\n` +
       `    Tip: quit Unreal Editor (or omit --no-close) and run npm run compile again.`
   );

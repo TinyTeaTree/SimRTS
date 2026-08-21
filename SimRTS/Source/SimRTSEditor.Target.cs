@@ -10,6 +10,6 @@ public class SimRTSEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V5;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_6;
-		ExtraModuleNames.AddRange(new string[] { "SimRTS", "SimRTSEditor" });
+		ExtraModuleNames.AddRange(new string[] { "SimRTS", "SimRTSEditor", "RTSComms" });
 	}
 }

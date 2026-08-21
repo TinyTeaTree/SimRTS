@@ -3,7 +3,9 @@
 ## Architecture
 
 - Keep **RTSEngine** pure C++ (STL / data-only). No Unreal types, UObjects, or gameplay APIs in sim sources.
+- Keep **RTSComms** pure C++ (STL + private TCP shim). No Unreal types in comms sources. Public API never blocks.
 - Keep **SimRTS** as the Unreal layer: display, input, HUD, JSON I/O, and bridge into RTSEngine.
+- **SimRTS is block-free:** never wait on HTTP/sockets/RTSComms I/O on the game thread. Enqueue + `TryPop` only.
 
 ## Casts — avoid noise
 

@@ -5,7 +5,10 @@ This project is an Unreal 5.6.1 RTS game Simulator.
 **RTSEngine** — pure C++ sim core (STL / data-only OOP). No Unreal gameplay types in sim sources.
 Deterministic tick engine: each step applies pending orders, advances movement, then increments the tick. No reverse/undo history.
 
+**RTSComms** — pure C++ matchmaking client (STL + POSIX/WinSock TCP). No Unreal gameplay types. Talks HTTP to `RTSServer`. Public API is non-blocking: enqueue Login/GetRooms/CreateRoom/JoinRoom/LeaveRoom, pump completions with `TryPop`. One I/O thread may block on HTTP; SimRTS must not.
+
 **SimRTS** — Unreal game module. Display (unit actors), input (selection, orders), HUD, level JSON I/O, and bridge into RTSEngine.
+**Block-free:** SimRTS (game thread) must never wait on network, sockets, or RTSComms I/O. It only enqueues work and pumps `TryPop` / sim ticks. A hitch from a blocking `Login` or `recv` on the game thread is a bug.
 
 **SimRTSEditor** — Editor-only module. Tools menu → **SimRTS Level Bake...**: bake placed obstruction actors (`ASimRTSObstructionVolume` box, `ASimRTSObstructionCylinderVolume` circle) into the level `obstruction` string, and editor-only spawn markers (`ASimRTSSpawnMarker`) into the spawns JSON.
 
