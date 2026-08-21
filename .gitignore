@@ -7,6 +7,9 @@
 # Node (compile helper)
 node_modules/
 
+# RTSServer (Go matchmaking host)
+RTSServer/bin/
+
 # IDEs / editors
 .idea/
 .vs/

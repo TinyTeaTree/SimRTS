@@ -4,6 +4,9 @@
   "scripts": {
     "compile": "node tools/compile.js",
     "compile:open": "node tools/compile.js -open",
-    "compile:hot": "node tools/compile.js --hot"
+    "compile:hot": "node tools/compile.js --hot",
+    "server_build": "node tools/rtsserver.js build",
+    "server_local_host": "node tools/rtsserver.js local",
+    "server_shutdown": "node tools/rtsserver.js shutdown"
   }
 }
