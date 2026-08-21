@@ -10,51 +10,135 @@
 		{
 			"id": 2,
 			"type": "Soldier",
+			"x": 456,
+			"y": 469,
+			"rotation": 50
+		},
+		{
+			"id": 3,
+			"type": "Soldier",
+			"x": 482,
+			"y": 469,
+			"rotation": 50
+		},
+		{
+			"id": 4,
+			"type": "Soldier",
+			"x": 506,
+			"y": 479,
+			"rotation": 50
+		},
+		{
+			"id": 5,
+			"type": "Soldier",
+			"x": 525,
+			"y": 508,
+			"rotation": 50
+		},
+		{
+			"id": 6,
+			"type": "Soldier",
+			"x": 514,
+			"y": 519,
+			"rotation": 50
+		},
+		{
+			"id": 7,
+			"type": "Soldier",
+			"x": 488,
+			"y": 543,
+			"rotation": 50
+		},
+		{
+			"id": 8,
+			"type": "Soldier",
+			"x": 458,
+			"y": 569,
+			"rotation": 50
+		},
+		{
+			"id": 9,
+			"type": "Soldier",
+			"x": 445,
+			"y": 554,
+			"rotation": 50
+		},
+		{
+			"id": 10,
+			"type": "Soldier",
+			"x": 432,
+			"y": 538,
+			"rotation": 50
+		},
+		{
+			"id": 11,
+			"type": "Soldier",
+			"x": 418,
+			"y": 521,
+			"rotation": 50
+		},
+		{
+			"id": 12,
+			"type": "Soldier",
 			"x": 482,
 			"y": 490,
 			"rotation": 80
 		},
 		{
-			"id": 3,
+			"id": 13,
+			"type": "Soldier",
+			"x": 432,
+			"y": 511,
+			"rotation": 50
+		},
+		{
+			"id": 14,
 			"type": "Soldier",
 			"x": 479,
 			"y": 559,
 			"rotation": 280
 		},
 		{
-			"id": 4,
+			"id": 15,
 			"type": "Soldier",
 			"x": 456,
 			"y": 495,
 			"rotation": 50
 		},
 		{
-			"id": 5,
+			"id": 16,
 			"type": "Soldier",
 			"x": 493,
 			"y": 525,
 			"rotation": 240
 		},
 		{
-			"id": 6,
+			"id": 17,
 			"type": "Soldier",
 			"x": 458,
 			"y": 541,
 			"rotation": 0
 		},
 		{
-			"id": 7,
+			"id": 18,
 			"type": "Soldier",
 			"x": 434,
 			"y": 480,
 			"rotation": 0
 		},
 		{
-			"id": 8,
+			"id": 19,
 			"type": "Soldier",
 			"x": 519,
 			"y": 487,
 			"rotation": 0
+		},
+		{
+			"id": 20,
+			"type": "Soldier",
+			"x": 470,
+			"y": 485,
+			"rotation": 50
 		}
 	]
 }
