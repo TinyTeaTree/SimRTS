@@ -21,7 +21,8 @@ void USelectionManager::HandleLeftClick(APlayerController* PlayerController)
 		PlayerController->IsInputKeyDown(EKeys::LeftShift) || PlayerController->IsInputKeyDown(EKeys::RightShift);
 
 	UWorld* World = PlayerController->GetWorld();
-	if (World == nullptr)
+	const ASimRTSGameMode* GameMode = World != nullptr ? World->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
+	if (World == nullptr || GameMode == nullptr || !GameMode->IsRoomLoaded())
 	{
 		if (!bShift)
 		{

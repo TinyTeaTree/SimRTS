@@ -6,6 +6,7 @@
 
 class UOrderManager;
 class USelectionManager;
+class USimRTSStartScreen;
 
 /** Tracks press→release so camera drags do not count as select/order clicks. */
 USTRUCT()
@@ -40,6 +41,11 @@ protected:
 	void OnRightPressed();
 	void OnRightReleased();
 
+	void ShowStartScreen();
+	void HideStartScreen();
+	void HandleStartClicked();
+	void ApplyGameplayInputMode();
+
 	void BeginGesture(FSimRTSClickGesture& Gesture);
 	void UpdateGestureDrag(FSimRTSClickGesture& Gesture);
 	bool ResolveClick(FSimRTSClickGesture& Gesture);
@@ -54,6 +60,9 @@ protected:
 
 	FSimRTSClickGesture LeftGesture;
 	FSimRTSClickGesture RightGesture;
+
+	UPROPERTY()
+	TObjectPtr<USimRTSStartScreen> StartScreen;
 
 	UPROPERTY()
 	TObjectPtr<USelectionManager> SelectionManager;

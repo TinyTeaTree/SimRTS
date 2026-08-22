@@ -17,7 +17,7 @@ void ASimRTSDebugHUD::DrawHUD()
 	}
 
 	const ASimRTSGameMode* GameMode = GetWorld()->GetAuthGameMode<ASimRTSGameMode>();
-	if (GameMode == nullptr)
+	if (GameMode == nullptr || !GameMode->IsRoomLoaded())
 	{
 		return;
 	}

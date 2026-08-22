@@ -20,7 +20,9 @@ public class SimRTS : ModuleRules
 			Path.Combine(ModuleDirectory, "Selection"),
 			Path.Combine(ModuleDirectory, "Spawn"),
 			Path.Combine(ModuleDirectory, "Units"),
-			Path.Combine(ModuleDirectory, "Debug")
+			Path.Combine(ModuleDirectory, "Debug"),
+			Path.Combine(ModuleDirectory, "Room"),
+			Path.Combine(ModuleDirectory, "UI")
 		});
 
 		PublicDependencyModuleNames.AddRange(new string[]
@@ -31,6 +33,9 @@ public class SimRTS : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"Json",
+			"UMG",
+			"Slate",
+			"SlateCore",
 			"RTSEngine",
 		});
 

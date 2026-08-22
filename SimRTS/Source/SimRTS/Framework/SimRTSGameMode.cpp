@@ -9,13 +9,14 @@
 #include "UnitViewManager.h"
 #include "Engine/World.h"
 #include "GameFramework/DefaultPawn.h"
-#include "TimerManager.h"
 
 ASimRTSGameMode::ASimRTSGameMode()
 {
 	DefaultPawnClass = ADefaultPawn::StaticClass();
 	PlayerControllerClass = ASimRTSPlayerController::StaticClass();
 	HUDClass = ASimRTSDebugHUD::StaticClass();
+
+	Room = CreateDefaultSubobject<USimRTSRoom>(TEXT("Room"));
 
 	// Soft paths: C++ GameMode stays native; Blueprints are loaded at BeginPlay if present.
 	SoldierActorClass = TSoftClassPtr<ASimRTSUnitActor>(
@@ -28,70 +29,79 @@ void ASimRTSGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
-	UnitViewManager = NewObject<UUnitViewManager>(this);
-	if (UClass* SoldierClass = SoldierActorClass.LoadSynchronous())
+	if (UUnitViewManager* ViewManager = GetUnitViewManager())
 	{
-		UnitViewManager->SetActorClassForType(SimRTS::UnitType::Soldier, SoldierClass);
-	}
-	if (UClass* VehicleClass = VehicleActorClass.LoadSynchronous())
-	{
-		UnitViewManager->SetActorClassForType(SimRTS::UnitType::Vehicle, VehicleClass);
-	}
-
-	if (!Bridge.ResetToDefaultLevel())
-	{
-		UE_LOG(LogTemp, Error, TEXT("SimRTS GameMode: level JSON failed to load; sim will not start."));
-		return;
-	}
-
-	if (UWorld* World = GetWorld())
-	{
-		if (bShowObstructionGrid)
+		if (UClass* SoldierClass = SoldierActorClass.LoadSynchronous())
 		{
-			ObstructionGridVisualizer = World->SpawnActor<ASimRTSObstructionGridVisualizer>();
-			if (ObstructionGridVisualizer)
-			{
-				ObstructionGridVisualizer->Build(Bridge.GetStaticData().pathing, GridScale, ObstructionGridMaxBlueDistance);
-			}
+			ViewManager->SetActorClassForType(SimRTS::UnitType::Soldier, SoldierClass);
 		}
-
-		if (bShowUnitPaths)
+		if (UClass* VehicleClass = VehicleActorClass.LoadSynchronous())
 		{
-			PathVisualizer = World->SpawnActor<ASimRTSPathVisualizer>();
+			ViewManager->SetActorClassForType(SimRTS::UnitType::Vehicle, VehicleClass);
 		}
 	}
 
-	
-	UnitViewManager->RebuildActors(this);
-	UnitViewManager->SyncActors(this);
-
-	const int32 TicksPerSecond = FMath::Max(1, Bridge.GetStaticData().ticks_per_second);
-	const float SimTickInterval = 1.f / static_cast<float>(TicksPerSecond);
-
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().SetTimer(
-			SimTimerHandle,
-			this,
-			&ASimRTSGameMode::OnSimTick,
-			SimTickInterval,
-			true);
-	}
-
-	UE_LOG(LogTemp, Log, TEXT("SimRTS GameMode started. Units=%d GridScale=%.1f EngineTicksPerSecond=%d (interval=%.3fs)"),
-		static_cast<int32>(Bridge.GetState().units.size()),
-		GridScale,
-		TicksPerSecond,
-		SimTickInterval);
+	UE_LOG(LogTemp, Log, TEXT("SimRTS GameMode ready. Waiting to load room."));
 }
 
 void ASimRTSGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (UWorld* World = GetWorld())
+	if (Room != nullptr)
 	{
-		World->GetTimerManager().ClearTimer(SimTimerHandle);
+		Room->Stop(*this);
+	}
+	DestroyDebugVisualizers();
+
+	Super::EndPlay(EndPlayReason);
+}
+
+bool ASimRTSGameMode::StartDefaultRoom()
+{
+	if (Room == nullptr)
+	{
+		return false;
 	}
 
+	if (Room->IsLoaded())
+	{
+		return true;
+	}
+
+	if (!Room->LoadDefault(*this))
+	{
+		UE_LOG(LogTemp, Error, TEXT("SimRTS GameMode: room failed to load; sim will not start."));
+		return false;
+	}
+
+	SpawnDebugVisualizers();
+	return true;
+}
+
+void ASimRTSGameMode::SpawnDebugVisualizers()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || Room == nullptr)
+	{
+		return;
+	}
+
+	if (bShowObstructionGrid)
+	{
+		ObstructionGridVisualizer = World->SpawnActor<ASimRTSObstructionGridVisualizer>();
+		if (ObstructionGridVisualizer)
+		{
+			ObstructionGridVisualizer->Build(Room->GetBridge().GetStaticData().pathing, GridScale, ObstructionGridMaxBlueDistance);
+		}
+	}
+
+	if (bShowUnitPaths)
+	{
+		PathVisualizer = World->SpawnActor<ASimRTSPathVisualizer>();
+	}
+}
+
+void ASimRTSGameMode::DestroyDebugVisualizers()
+{
 	if (ObstructionGridVisualizer)
 	{
 		ObstructionGridVisualizer->Destroy();
@@ -103,23 +113,12 @@ void ASimRTSGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		PathVisualizer->Destroy();
 		PathVisualizer = nullptr;
 	}
-
-	Super::EndPlay(EndPlayReason);
-}
-
-void ASimRTSGameMode::OnSimTick()
-{
-	Bridge.StepForward();
-	if (UnitViewManager != nullptr)
-	{
-		UnitViewManager->SyncActors(this);
-	}
 }
 
 FVector ASimRTSGameMode::GridToWorld(int32 X, int32 Y) const
 {
-	const float WorldW = static_cast<float>(Bridge.GetStaticData().world_width) * GridScale;
-	const float WorldH = static_cast<float>(Bridge.GetStaticData().world_height) * GridScale;
+	const float WorldW = static_cast<float>(GetBridge().GetStaticData().world_width) * GridScale;
+	const float WorldH = static_cast<float>(GetBridge().GetStaticData().world_height) * GridScale;
 	const float XWorld = static_cast<float>(X) * GridScale - WorldW * 0.5f;
 	const float YWorld = static_cast<float>(Y) * GridScale - WorldH * 0.5f;
 	return FVector(XWorld, YWorld, 0.f);
@@ -132,8 +131,8 @@ bool ASimRTSGameMode::WorldToGrid(const FVector& WorldLocation, int32& OutX, int
 		return false;
 	}
 
-	const int32 WorldWidth = Bridge.GetStaticData().world_width;
-	const int32 WorldHeight = Bridge.GetStaticData().world_height;
+	const int32 WorldWidth = GetBridge().GetStaticData().world_width;
+	const int32 WorldHeight = GetBridge().GetStaticData().world_height;
 	const float WorldW = static_cast<float>(WorldWidth) * GridScale;
 	const float WorldH = static_cast<float>(WorldHeight) * GridScale;
 

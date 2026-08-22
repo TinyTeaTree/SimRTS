@@ -2,6 +2,8 @@
 
 #include "OrderManager.h"
 #include "SelectionManager.h"
+#include "SimRTSGameMode.h"
+#include "SimRTSStartScreen.h"
 #include "InputCoreTypes.h"
 
 ASimRTSPlayerController::ASimRTSPlayerController()
@@ -18,10 +20,59 @@ void ASimRTSPlayerController::BeginPlay()
 	SelectionManager = NewObject<USelectionManager>(this);
 	OrderManager = NewObject<UOrderManager>(this);
 
+	ShowStartScreen();
+}
+
+void ASimRTSPlayerController::ShowStartScreen()
+{
+	if (StartScreen == nullptr)
+	{
+		StartScreen = CreateWidget<USimRTSStartScreen>(this);
+		if (StartScreen == nullptr)
+		{
+			return;
+		}
+		StartScreen->OnStartClicked.AddUObject(this, &ASimRTSPlayerController::HandleStartClicked);
+	}
+
+	StartScreen->AddToViewport(100);
+
+	FInputModeUIOnly InputMode;
+	InputMode.SetWidgetToFocus(StartScreen->TakeWidget());
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	SetInputMode(InputMode);
+	bShowMouseCursor = true;
+}
+
+void ASimRTSPlayerController::HideStartScreen()
+{
+	if (StartScreen != nullptr)
+	{
+		StartScreen->RemoveFromParent();
+		StartScreen = nullptr;
+	}
+
+	ApplyGameplayInputMode();
+}
+
+void ASimRTSPlayerController::HandleStartClicked()
+{
+	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
+	if (GameMode == nullptr || !GameMode->StartDefaultRoom())
+	{
+		return;
+	}
+
+	HideStartScreen();
+}
+
+void ASimRTSPlayerController::ApplyGameplayInputMode()
+{
 	FInputModeGameAndUI InputMode;
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	InputMode.SetHideCursorDuringCapture(false);
 	SetInputMode(InputMode);
+	bShowMouseCursor = true;
 }
 
 void ASimRTSPlayerController::SetupInputComponent()
@@ -112,11 +163,20 @@ bool ASimRTSPlayerController::ResolveClick(FSimRTSClickGesture& Gesture)
 
 void ASimRTSPlayerController::OnLeftPressed()
 {
+	if (StartScreen != nullptr)
+	{
+		return;
+	}
 	BeginGesture(LeftGesture);
 }
 
 void ASimRTSPlayerController::OnLeftReleased()
 {
+	if (StartScreen != nullptr)
+	{
+		LeftGesture = {};
+		return;
+	}
 	UpdateGestureDrag(LeftGesture);
 	if (ResolveClick(LeftGesture) && SelectionManager != nullptr)
 	{
@@ -126,11 +186,20 @@ void ASimRTSPlayerController::OnLeftReleased()
 
 void ASimRTSPlayerController::OnRightPressed()
 {
+	if (StartScreen != nullptr)
+	{
+		return;
+	}
 	BeginGesture(RightGesture);
 }
 
 void ASimRTSPlayerController::OnRightReleased()
 {
+	if (StartScreen != nullptr)
+	{
+		RightGesture = {};
+		return;
+	}
 	UpdateGestureDrag(RightGesture);
 	if (ResolveClick(RightGesture) && OrderManager != nullptr)
 	{

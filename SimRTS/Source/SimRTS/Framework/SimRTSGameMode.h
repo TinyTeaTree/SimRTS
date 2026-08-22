@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
-#include "SimBridge.h"
+#include "SimRTSRoom.h"
 #include "SimRTSGameMode.generated.h"
 
 class ASimRTSUnitActor;
@@ -21,10 +21,15 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	FSimBridge& GetBridge() { return Bridge; }
-	const FSimBridge& GetBridge() const { return Bridge; }
+	/** Load the default room (level, units, sim clock). No-op if already loaded. */
+	bool StartDefaultRoom();
 
-	UUnitViewManager* GetUnitViewManager() const { return UnitViewManager; }
+	bool IsRoomLoaded() const { return Room != nullptr && Room->IsLoaded(); }
+
+	FSimBridge& GetBridge() { return Room->GetBridge(); }
+	const FSimBridge& GetBridge() const { return Room->GetBridge(); }
+
+	UUnitViewManager* GetUnitViewManager() const { return Room != nullptr ? Room->GetUnitViewManager() : nullptr; }
 
 	float GetGridScale() const { return GridScale; }
 
@@ -64,12 +69,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Units")
 	TSoftClassPtr<ASimRTSUnitActor> VehicleActorClass;
 
-	void OnSimTick();
-
 private:
-	FSimBridge Bridge;
-	FTimerHandle SimTimerHandle;
+	void SpawnDebugVisualizers();
+	void DestroyDebugVisualizers();
 
 	UPROPERTY()
-	TObjectPtr<UUnitViewManager> UnitViewManager;
+	TObjectPtr<USimRTSRoom> Room;
 };

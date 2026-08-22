@@ -65,7 +65,7 @@ void UOrderManager::HandleRightClick(APlayerController* PlayerController, const 
 	}
 
 	ASimRTSGameMode* GameMode = World->GetAuthGameMode<ASimRTSGameMode>();
-	if (GameMode == nullptr)
+	if (GameMode == nullptr || !GameMode->IsRoomLoaded())
 	{
 		return;
 	}
