@@ -37,6 +37,7 @@ public class SimRTS : ModuleRules
 			"Slate",
 			"SlateCore",
 			"RTSEngine",
+			"RTSComms",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

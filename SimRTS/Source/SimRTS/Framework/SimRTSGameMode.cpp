@@ -1,5 +1,6 @@
 #include "SimRTSGameMode.h"
 
+#include "NetworkingLoader.h"
 #include "SimRTSDebugHUD.h"
 #include "SimRTSObstructionGridVisualizer.h"
 #include "SimRTSPathVisualizer.h"
@@ -10,15 +11,43 @@
 #include "Engine/World.h"
 #include "GameFramework/DefaultPawn.h"
 
+namespace {
+
+FString CommsToFString(const std::string& Value)
+{
+	return UTF8_TO_TCHAR(Value.c_str());
+}
+
+std::string FStringToComms(const FString& Value)
+{
+	return std::string(TCHAR_TO_UTF8(*Value));
+}
+
+FSimRTSCommsRoomView MakeRoomView(const SimRTS::CommsRoom& Room)
+{
+	FSimRTSCommsRoomView View;
+	View.Id = CommsToFString(Room.id);
+	View.PlayerIds.Reserve(static_cast<int32>(Room.player_ids.size()));
+	for (const std::string& PlayerId : Room.player_ids)
+	{
+		View.PlayerIds.Add(CommsToFString(PlayerId));
+	}
+	return View;
+}
+
+} // namespace
+
 ASimRTSGameMode::ASimRTSGameMode()
 {
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = true;
+
 	DefaultPawnClass = ADefaultPawn::StaticClass();
 	PlayerControllerClass = ASimRTSPlayerController::StaticClass();
 	HUDClass = ASimRTSDebugHUD::StaticClass();
 
 	Room = CreateDefaultSubobject<USimRTSRoom>(TEXT("Room"));
 
-	// Soft paths: C++ GameMode stays native; Blueprints are loaded at BeginPlay if present.
 	SoldierActorClass = TSoftClassPtr<ASimRTSUnitActor>(
 		FSoftObjectPath(TEXT("/Game/Units/MySimRTSSoldierActor.MySimRTSSoldierActor_C")));
 	VehicleActorClass = TSoftClassPtr<ASimRTSUnitActor>(
@@ -28,6 +57,22 @@ ASimRTSGameMode::ASimRTSGameMode()
 void ASimRTSGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+
+	const FNetworkingLoadResult Networking = NetworkingLoader::LoadDefault();
+	if (!Networking.bSuccess)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SimRTS GameMode: %s; comms will not start."), *Networking.Error);
+	}
+	else
+	{
+		MockTickLag = Networking.Config.MockTickLag;
+		Comms.SetHost(FStringToComms(Networking.Config.Ip), Networking.Config.Port);
+		Comms.Start();
+		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d mock_tick_lag=%d"),
+			*Networking.Config.Ip,
+			Networking.Config.Port,
+			MockTickLag);
+	}
 
 	if (UUnitViewManager* ViewManager = GetUnitViewManager())
 	{
@@ -46,13 +91,24 @@ void ASimRTSGameMode::BeginPlay()
 
 void ASimRTSGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	bMatchmakingMenuOpen = false;
+	Comms.Stop();
+
 	if (Room != nullptr)
 	{
 		Room->Stop(*this);
 	}
+	DelayedMoveOrders.Reset();
 	DestroyDebugVisualizers();
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void ASimRTSGameMode::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	PumpComms();
+	MaybePollRooms(DeltaSeconds);
 }
 
 bool ASimRTSGameMode::StartDefaultRoom()
@@ -73,8 +129,200 @@ bool ASimRTSGameMode::StartDefaultRoom()
 		return false;
 	}
 
+	SetMatchmakingMenuOpen(false);
 	SpawnDebugVisualizers();
 	return true;
+}
+
+void ASimRTSGameMode::RequestLogin(const FString& Username)
+{
+	bUserRequestPending = true;
+	Comms.Login(FStringToComms(Username));
+}
+
+void ASimRTSGameMode::RequestGetRooms()
+{
+	Comms.GetRooms();
+}
+
+void ASimRTSGameMode::RequestCreateRoom(const FString& RoomId)
+{
+	bUserRequestPending = true;
+	Comms.CreateRoom(FStringToComms(RoomId));
+}
+
+void ASimRTSGameMode::RequestJoinRoom(const FString& RoomId)
+{
+	bUserRequestPending = true;
+	Comms.JoinRoom(FStringToComms(RoomId));
+}
+
+void ASimRTSGameMode::RequestLeaveRoom()
+{
+	if (JoinedMatchmakingRoomId.IsEmpty())
+	{
+		return;
+	}
+
+	bUserRequestPending = true;
+	Comms.LeaveRoom(FStringToComms(JoinedMatchmakingRoomId));
+}
+
+void ASimRTSGameMode::SetMatchmakingMenuOpen(bool bOpen)
+{
+	bMatchmakingMenuOpen = bOpen;
+	RoomListPollAccum = 0.f;
+}
+
+void ASimRTSGameMode::SubmitMoveOrder(const TArray<int32>& UnitIds, int32 TargetX, int32 TargetY, bool bIsNext)
+{
+	if (!IsRoomLoaded() || UnitIds.Num() == 0)
+	{
+		return;
+	}
+
+	if (MockTickLag <= 0)
+	{
+		GetBridge().SubmitMoveOrder(UnitIds, TargetX, TargetY, bIsNext);
+		return;
+	}
+
+	FDelayedMoveOrder Delayed;
+	Delayed.UnitIds = UnitIds;
+	Delayed.TargetX = TargetX;
+	Delayed.TargetY = TargetY;
+	Delayed.bIsNext = bIsNext;
+	Delayed.ApplyAtTick = GetBridge().GetTick() + MockTickLag;
+	DelayedMoveOrders.Add(MoveTemp(Delayed));
+}
+
+void ASimRTSGameMode::FlushDelayedMoveOrders()
+{
+	if (!IsRoomLoaded() || DelayedMoveOrders.Num() == 0)
+	{
+		return;
+	}
+
+	const int32 CurrentTick = GetBridge().GetTick();
+	for (int32 Index = DelayedMoveOrders.Num() - 1; Index >= 0; --Index)
+	{
+		const FDelayedMoveOrder& Delayed = DelayedMoveOrders[Index];
+		if (CurrentTick < Delayed.ApplyAtTick)
+		{
+			continue;
+		}
+
+		GetBridge().SubmitMoveOrder(Delayed.UnitIds, Delayed.TargetX, Delayed.TargetY, Delayed.bIsNext);
+		DelayedMoveOrders.RemoveAt(Index);
+	}
+}
+
+bool ASimRTSGameMode::IsMatchmakingLoggedIn() const
+{
+	return !Comms.SessionToken().empty();
+}
+
+FString ASimRTSGameMode::GetMatchmakingNickname() const
+{
+	return CommsToFString(Comms.Nickname());
+}
+
+FString ASimRTSGameMode::GetMatchmakingPlayerId() const
+{
+	return CommsToFString(Comms.PlayerId());
+}
+
+void ASimRTSGameMode::PumpComms()
+{
+	SimRTS::CommsEvent Event;
+	while (Comms.TryPop(Event))
+	{
+		const FSimRTSCommsEventView View = MakeCommsView(Event);
+
+		if (Event.kind == SimRTS::CommsEventKind::CreateRoom && Event.result.ok)
+		{
+			Comms.JoinRoom(Event.result.room.id);
+			OnCommsEvent.Broadcast(View);
+			continue;
+		}
+
+		if (Event.kind == SimRTS::CommsEventKind::JoinRoom && Event.result.ok)
+		{
+			JoinedMatchmakingRoomId = View.Room.Id;
+		}
+		else if (Event.kind == SimRTS::CommsEventKind::LeaveRoom && Event.result.ok)
+		{
+			JoinedMatchmakingRoomId.Empty();
+		}
+
+		if (Event.kind != SimRTS::CommsEventKind::GetRooms)
+		{
+			bUserRequestPending = false;
+		}
+
+		OnCommsEvent.Broadcast(View);
+	}
+}
+
+void ASimRTSGameMode::MaybePollRooms(float DeltaSeconds)
+{
+	if (!bMatchmakingMenuOpen || !IsMatchmakingLoggedIn() || bUserRequestPending || IsRoomLoaded())
+	{
+		return;
+	}
+
+	RoomListPollAccum += DeltaSeconds;
+	if (RoomListPollAccum < RoomListPollSeconds)
+	{
+		return;
+	}
+
+	RoomListPollAccum = 0.f;
+	Comms.GetRooms();
+}
+
+FSimRTSCommsEventView ASimRTSGameMode::MakeCommsView(const SimRTS::CommsEvent& Event) const
+{
+	FSimRTSCommsEventView View;
+	switch (Event.kind)
+	{
+	case SimRTS::CommsEventKind::Login:
+		View.Kind = ESimRTSCommsKind::Login;
+		break;
+	case SimRTS::CommsEventKind::GetRooms:
+		View.Kind = ESimRTSCommsKind::GetRooms;
+		break;
+	case SimRTS::CommsEventKind::CreateRoom:
+		View.Kind = ESimRTSCommsKind::CreateRoom;
+		break;
+	case SimRTS::CommsEventKind::JoinRoom:
+		View.Kind = ESimRTSCommsKind::JoinRoom;
+		break;
+	case SimRTS::CommsEventKind::LeaveRoom:
+		View.Kind = ESimRTSCommsKind::LeaveRoom;
+		break;
+	}
+
+	View.bOk = Event.result.ok;
+	View.HttpStatus = Event.result.http_status;
+	View.Error = CommsToFString(Event.result.error);
+	View.Nickname = CommsToFString(Event.result.session.nickname);
+	View.PlayerId = CommsToFString(Event.result.session.player_id);
+	if (View.Nickname.IsEmpty())
+	{
+		View.Nickname = GetMatchmakingNickname();
+	}
+	if (View.PlayerId.IsEmpty())
+	{
+		View.PlayerId = GetMatchmakingPlayerId();
+	}
+	View.Room = MakeRoomView(Event.result.room);
+	View.Rooms.Reserve(static_cast<int32>(Event.result.rooms.size()));
+	for (const SimRTS::CommsRoom& RoomData : Event.result.rooms)
+	{
+		View.Rooms.Add(MakeRoomView(RoomData));
+	}
+	return View;
 }
 
 void ASimRTSGameMode::SpawnDebugVisualizers()

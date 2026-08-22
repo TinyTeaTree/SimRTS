@@ -69,9 +69,14 @@ void USimRTSRoom::OnSimTick()
 		return;
 	}
 
+	ASimRTSGameMode* GameMode = Cast<ASimRTSGameMode>(GetOuter());
+	if (GameMode != nullptr)
+	{
+		GameMode->FlushDelayedMoveOrders();
+	}
+
 	Bridge.StepForward();
 
-	ASimRTSGameMode* GameMode = Cast<ASimRTSGameMode>(GetOuter());
 	if (GameMode != nullptr && UnitViewManager != nullptr)
 	{
 		UnitViewManager->SyncActors(GameMode);

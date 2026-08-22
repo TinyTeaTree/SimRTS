@@ -3,8 +3,30 @@
 #include "OrderManager.h"
 #include "SelectionManager.h"
 #include "SimRTSGameMode.h"
-#include "SimRTSStartScreen.h"
+#include "SimRTSMainMenu.h"
 #include "InputCoreTypes.h"
+#include "Misc/Char.h"
+
+namespace {
+
+bool IsValidCommsName(const FString& Name)
+{
+	if (Name.Len() < 1 || Name.Len() > 64)
+	{
+		return false;
+	}
+
+	for (const TCHAR Character : Name)
+	{
+		if (!FChar::IsAlnum(Character) && Character != TEXT('_') && Character != TEXT('-'))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+} // namespace
 
 ASimRTSPlayerController::ASimRTSPlayerController()
 {
@@ -20,50 +42,57 @@ void ASimRTSPlayerController::BeginPlay()
 	SelectionManager = NewObject<USelectionManager>(this);
 	OrderManager = NewObject<UOrderManager>(this);
 
-	ShowStartScreen();
+	ShowMainMenu();
 }
 
-void ASimRTSPlayerController::ShowStartScreen()
+void ASimRTSPlayerController::ShowMainMenu()
 {
-	if (StartScreen == nullptr)
+	if (MainMenu == nullptr)
 	{
-		StartScreen = CreateWidget<USimRTSStartScreen>(this);
-		if (StartScreen == nullptr)
+		MainMenu = CreateWidget<USimRTSMainMenu>(this);
+		if (MainMenu == nullptr)
 		{
 			return;
 		}
-		StartScreen->OnStartClicked.AddUObject(this, &ASimRTSPlayerController::HandleStartClicked);
+		MainMenu->OnLoginRequested.AddUObject(this, &ASimRTSPlayerController::HandleLoginRequested);
+		MainMenu->OnCreateRoomRequested.AddUObject(this, &ASimRTSPlayerController::HandleCreateRoomRequested);
+		MainMenu->OnJoinRoomRequested.AddUObject(this, &ASimRTSPlayerController::HandleJoinRoomRequested);
+		MainMenu->OnLeaveRequested.AddUObject(this, &ASimRTSPlayerController::HandleLeaveRequested);
+		MainMenu->OnStartClicked.AddUObject(this, &ASimRTSPlayerController::HandleStartClicked);
 	}
 
-	StartScreen->AddToViewport(100);
+	if (ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr)
+	{
+		GameMode->OnCommsEvent.AddUObject(this, &ASimRTSPlayerController::HandleCommsEvent);
+		GameMode->SetMatchmakingMenuOpen(true);
+	}
+
+	MainMenu->AddToViewport(100);
+	MainMenu->ShowLogin();
+	MainMenu->SetStatus(TEXT("Login to continue."), false);
 
 	FInputModeUIOnly InputMode;
-	InputMode.SetWidgetToFocus(StartScreen->TakeWidget());
+	InputMode.SetWidgetToFocus(MainMenu->TakeWidget());
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(InputMode);
 	bShowMouseCursor = true;
 }
 
-void ASimRTSPlayerController::HideStartScreen()
+void ASimRTSPlayerController::HideMainMenu()
 {
-	if (StartScreen != nullptr)
+	if (ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr)
 	{
-		StartScreen->RemoveFromParent();
-		StartScreen = nullptr;
+		GameMode->SetMatchmakingMenuOpen(false);
+		GameMode->OnCommsEvent.RemoveAll(this);
+	}
+
+	if (MainMenu != nullptr)
+	{
+		MainMenu->RemoveFromParent();
+		MainMenu = nullptr;
 	}
 
 	ApplyGameplayInputMode();
-}
-
-void ASimRTSPlayerController::HandleStartClicked()
-{
-	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
-	if (GameMode == nullptr || !GameMode->StartDefaultRoom())
-	{
-		return;
-	}
-
-	HideStartScreen();
 }
 
 void ASimRTSPlayerController::ApplyGameplayInputMode()
@@ -73,6 +102,155 @@ void ASimRTSPlayerController::ApplyGameplayInputMode()
 	InputMode.SetHideCursorDuringCapture(false);
 	SetInputMode(InputMode);
 	bShowMouseCursor = true;
+}
+
+void ASimRTSPlayerController::HandleLoginRequested(const FString& Username)
+{
+	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
+	if (GameMode == nullptr || MainMenu == nullptr)
+	{
+		return;
+	}
+
+	if (!IsValidCommsName(Username))
+	{
+		MainMenu->SetStatus(TEXT("Username: 1-64 letters, digits, _ or -."), true);
+		return;
+	}
+
+	MainMenu->SetBusy(true);
+	MainMenu->SetStatus(TEXT("Logging in..."), false);
+	GameMode->RequestLogin(Username);
+}
+
+void ASimRTSPlayerController::HandleCreateRoomRequested(const FString& RoomId)
+{
+	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
+	if (GameMode == nullptr || MainMenu == nullptr)
+	{
+		return;
+	}
+
+	if (!IsValidCommsName(RoomId))
+	{
+		MainMenu->SetStatus(TEXT("Room name: 1-64 letters, digits, _ or -."), true);
+		return;
+	}
+
+	MainMenu->SetBusy(true);
+	MainMenu->SetStatus(FString::Printf(TEXT("Creating %s..."), *RoomId), false);
+	GameMode->RequestCreateRoom(RoomId);
+}
+
+void ASimRTSPlayerController::HandleJoinRoomRequested(const FString& RoomId)
+{
+	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
+	if (GameMode == nullptr || MainMenu == nullptr)
+	{
+		return;
+	}
+
+	MainMenu->SetBusy(true);
+	MainMenu->SetStatus(FString::Printf(TEXT("Joining %s..."), *RoomId), false);
+	GameMode->RequestJoinRoom(RoomId);
+}
+
+void ASimRTSPlayerController::HandleLeaveRequested()
+{
+	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
+	if (GameMode == nullptr || MainMenu == nullptr)
+	{
+		return;
+	}
+
+	MainMenu->SetBusy(true);
+	MainMenu->SetStatus(TEXT("Leaving..."), false);
+	GameMode->RequestLeaveRoom();
+}
+
+void ASimRTSPlayerController::HandleStartClicked()
+{
+	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
+	if (GameMode == nullptr || !GameMode->StartDefaultRoom())
+	{
+		if (MainMenu != nullptr)
+		{
+			MainMenu->SetStatus(TEXT("Failed to load level."), true);
+		}
+		return;
+	}
+
+	HideMainMenu();
+}
+
+void ASimRTSPlayerController::HandleCommsEvent(const FSimRTSCommsEventView& Event)
+{
+	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
+	if (MainMenu == nullptr || GameMode == nullptr)
+	{
+		return;
+	}
+
+	if (!Event.bOk)
+	{
+		MainMenu->SetBusy(false);
+		const FString Error = Event.Error.IsEmpty() ? TEXT("Request failed.") : Event.Error;
+		MainMenu->SetStatus(Error, true);
+		return;
+	}
+
+	switch (Event.Kind)
+	{
+	case ESimRTSCommsKind::Login:
+		MenuPage = ESimRTSMenuPage::Lobby;
+		MainMenu->SetBusy(false);
+		MainMenu->SetStatus(TEXT("Fetching rooms..."), false);
+		MainMenu->ShowLobby(GameMode->GetMatchmakingNickname(), LastRooms);
+		GameMode->RequestGetRooms();
+		break;
+
+	case ESimRTSCommsKind::GetRooms:
+		LastRooms = Event.Rooms;
+		if (MenuPage == ESimRTSMenuPage::Room)
+		{
+			const FString JoinedId = GameMode->GetJoinedMatchmakingRoomId();
+			TArray<FString> PlayerIds;
+			for (const FSimRTSCommsRoomView& Room : LastRooms)
+			{
+				if (Room.Id == JoinedId)
+				{
+					PlayerIds = Room.PlayerIds;
+					break;
+				}
+			}
+			MainMenu->ShowRoom(JoinedId, PlayerIds, GameMode->GetMatchmakingPlayerId());
+		}
+		else if (MenuPage == ESimRTSMenuPage::Lobby)
+		{
+			MainMenu->ShowLobby(GameMode->GetMatchmakingNickname(), LastRooms);
+			MainMenu->SetStatus(TEXT(""), false);
+		}
+		break;
+
+	case ESimRTSCommsKind::CreateRoom:
+		MainMenu->SetStatus(FString::Printf(TEXT("Joining %s..."), *Event.Room.Id), false);
+		break;
+
+	case ESimRTSCommsKind::JoinRoom:
+		MenuPage = ESimRTSMenuPage::Room;
+		MainMenu->SetBusy(false);
+		MainMenu->SetStatus(TEXT(""), false);
+		MainMenu->ShowRoom(Event.Room.Id, Event.Room.PlayerIds, GameMode->GetMatchmakingPlayerId());
+		break;
+
+	case ESimRTSCommsKind::LeaveRoom:
+		MenuPage = ESimRTSMenuPage::Lobby;
+		MainMenu->SetBusy(false);
+		MainMenu->SetStatus(TEXT("Left room."), false);
+		MainMenu->ShowLobby(GameMode->GetMatchmakingNickname(), LastRooms);
+		GameMode->RequestGetRooms();
+		break;
+	}
 }
 
 void ASimRTSPlayerController::SetupInputComponent()
@@ -163,7 +341,7 @@ bool ASimRTSPlayerController::ResolveClick(FSimRTSClickGesture& Gesture)
 
 void ASimRTSPlayerController::OnLeftPressed()
 {
-	if (StartScreen != nullptr)
+	if (MainMenu != nullptr)
 	{
 		return;
 	}
@@ -172,7 +350,7 @@ void ASimRTSPlayerController::OnLeftPressed()
 
 void ASimRTSPlayerController::OnLeftReleased()
 {
-	if (StartScreen != nullptr)
+	if (MainMenu != nullptr)
 	{
 		LeftGesture = {};
 		return;
@@ -186,7 +364,7 @@ void ASimRTSPlayerController::OnLeftReleased()
 
 void ASimRTSPlayerController::OnRightPressed()
 {
-	if (StartScreen != nullptr)
+	if (MainMenu != nullptr)
 	{
 		return;
 	}
@@ -195,7 +373,7 @@ void ASimRTSPlayerController::OnRightPressed()
 
 void ASimRTSPlayerController::OnRightReleased()
 {
-	if (StartScreen != nullptr)
+	if (MainMenu != nullptr)
 	{
 		RightGesture = {};
 		return;

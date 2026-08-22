@@ -80,5 +80,5 @@ void UOrderManager::HandleRightClick(APlayerController* PlayerController, const 
 	const bool bIsNext = PlayerController->IsInputKeyDown(EKeys::LeftShift)
 		|| PlayerController->IsInputKeyDown(EKeys::RightShift);
 
-	GameMode->GetBridge().SubmitMoveOrder(SelectedIds, GridX, GridY, bIsNext);
+	GameMode->SubmitMoveOrder(SelectedIds, GridX, GridY, bIsNext);
 }

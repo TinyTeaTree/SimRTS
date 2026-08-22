@@ -1,7 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CommsClient.h"
 #include "GameFramework/GameModeBase.h"
+#include "SimRTSCommsView.h"
 #include "SimRTSRoom.h"
 #include "SimRTSGameMode.generated.h"
 
@@ -9,6 +11,20 @@ class ASimRTSUnitActor;
 class UUnitViewManager;
 class ASimRTSObstructionGridVisualizer;
 class ASimRTSPathVisualizer;
+
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnSimRTSCommsEvent, const FSimRTSCommsEventView&);
+
+USTRUCT()
+struct FDelayedMoveOrder
+{
+	GENERATED_BODY()
+
+	TArray<int32> UnitIds;
+	int32 TargetX = 0;
+	int32 TargetY = 0;
+	bool bIsNext = false;
+	int32 ApplyAtTick = 0;
+};
 
 UCLASS()
 class SIMRTS_API ASimRTSGameMode : public AGameModeBase
@@ -20,8 +36,9 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void Tick(float DeltaSeconds) override;
 
-	/** Load the default room (level, units, sim clock). No-op if already loaded. */
+	/** Load the default sim room (level, units, sim clock). No-op if already loaded. */
 	bool StartDefaultRoom();
 
 	bool IsRoomLoaded() const { return Room != nullptr && Room->IsLoaded(); }
@@ -33,15 +50,34 @@ public:
 
 	float GetGridScale() const { return GridScale; }
 
-	/** Ground-plane world location for a discrete cell (Z = 0). */
 	FVector GridToWorld(int32 X, int32 Y) const;
-	/** Inverse of GridToWorld; clamps to sim world bounds. Returns false if GridScale is invalid. */
 	bool WorldToGrid(const FVector& WorldLocation, int32& OutX, int32& OutY) const;
 
+	void RequestLogin(const FString& Username);
+	void RequestGetRooms();
+	void RequestCreateRoom(const FString& RoomId);
+	void RequestJoinRoom(const FString& RoomId);
+	void RequestLeaveRoom();
+
+	void SetMatchmakingMenuOpen(bool bOpen);
+
+	/** Move order from input. mock_tick_lag 0 applies now; otherwise queues until that many sim ticks. */
+	void SubmitMoveOrder(const TArray<int32>& UnitIds, int32 TargetX, int32 TargetY, bool bIsNext);
+	void FlushDelayedMoveOrders();
+
+	bool IsMatchmakingLoggedIn() const;
+	FString GetMatchmakingNickname() const;
+	FString GetMatchmakingPlayerId() const;
+	FString GetJoinedMatchmakingRoomId() const { return JoinedMatchmakingRoomId; }
+
+	FOnSimRTSCommsEvent OnCommsEvent;
+
 protected:
-	/** Unreal units per discrete sim grid point (10 UU = 1 dm per cell → 1000 cells = 10k UU). */
 	UPROPERTY(EditDefaultsOnly, Category = "SimRTS")
 	float GridScale = 10.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Comms", meta = (ClampMin = "0.5"))
+	float RoomListPollSeconds = 2.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Debug")
 	bool bShowObstructionGrid = false;
@@ -49,7 +85,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Debug", meta = (ClampMin = "1"))
 	int32 ObstructionGridMaxBlueDistance = 30;
 
-	/** Editor-only overlay: dashed arrows for each unit's current and queued move segments. */
 	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Debug")
 	bool bShowUnitPaths = true;
 
@@ -59,10 +94,6 @@ protected:
 	UPROPERTY()
 	TObjectPtr<ASimRTSPathVisualizer> PathVisualizer;
 
-	/**
-	 * Optional display Blueprints (loaded by soft path).
-	 * Defaults target Content/Units/MySimRTS* actors; empty/missing → native C++ class.
-	 */
 	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Units")
 	TSoftClassPtr<ASimRTSUnitActor> SoldierActorClass;
 
@@ -72,7 +103,18 @@ protected:
 private:
 	void SpawnDebugVisualizers();
 	void DestroyDebugVisualizers();
+	void PumpComms();
+	void MaybePollRooms(float DeltaSeconds);
+	FSimRTSCommsEventView MakeCommsView(const SimRTS::CommsEvent& Event) const;
 
 	UPROPERTY()
 	TObjectPtr<USimRTSRoom> Room;
+
+	SimRTS::CommsClient Comms;
+	int32 MockTickLag = 0;
+	TArray<FDelayedMoveOrder> DelayedMoveOrders;
+	FString JoinedMatchmakingRoomId;
+	bool bMatchmakingMenuOpen = false;
+	bool bUserRequestPending = false;
+	float RoomListPollAccum = 0.f;
 };

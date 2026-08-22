@@ -33,6 +33,17 @@ Flow:
 
 Editing the JSON changes the level without recompiling C++ (restart Play / reload level). There is no code-built fallback level — a missing or invalid JSON fails level load. `Content/Data` is staged for packaged builds via `DefaultGame.ini`.
 
+## Networking configuration (JSON)
+
+Matchmaking host and local lockstep delay live in:
+
+`SimRTS/Content/Data/Networking.json`
+
+- `ip` / `port` — RTSServer address (SimRTS loads this at BeginPlay into `CommsClient`; no code-hardcoded host)
+- `mock_tick_lag` — sim ticks to wait after a move click before `SubmitOrder` (0 = immediate)
+
+A missing or invalid file logs an error and does not start comms.
+
 ## Simulation model
 
 World uses discrete integer points (e.g. 1000×1000). With `GridScale = 10` UU (1 dm per point), **speed 10 ≈ 1 m/s**.
