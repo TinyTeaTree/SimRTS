@@ -6,17 +6,6 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
-namespace {
-
-FNetworkingLoadResult Fail(const FString& Error)
-{
-	FNetworkingLoadResult Result;
-	Result.Error = Error;
-	return Result;
-}
-
-} // namespace
-
 FNetworkingLoadResult NetworkingLoader::ParseJsonString(const FString& JsonText)
 {
 	FNetworkingLoadResult Result;
@@ -74,7 +63,9 @@ FNetworkingLoadResult NetworkingLoader::LoadFromFile(const FString& FilePath)
 	FString JsonText;
 	if (!FFileHelper::LoadFileToString(JsonText, *FilePath))
 	{
-		return Fail(FString::Printf(TEXT("could not read JSON '%s'"), *FilePath));
+		FNetworkingLoadResult Result;
+		Result.Error = FString::Printf(TEXT("could not read JSON '%s'"), *FilePath);
+		return Result;
 	}
 	return ParseJsonString(JsonText);
 }
