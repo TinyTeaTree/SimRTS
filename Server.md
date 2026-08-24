@@ -23,11 +23,14 @@ Run these from the **repo root** (`SimRTS/`, next to `package.json`).
 
 ```bash
 npm run server_build        # compile RTSServer/bin/rtsserver
-npm run server_local_host   # listen on 127.0.0.1:8080 (go run)
+npm run server_local_host   # listen on 127.0.0.1:8080 (this computer only)
+npm run server_nat_host     # listen on 0.0.0.0:8080 (LAN); prints ip for other computers
 npm run server_shutdown     # free port 8080 (SIGTERM, then SIGKILL)
 ```
 
-`server_local_host` occupies the terminal. Use a second terminal for curl.
+`server_local_host` and `server_nat_host` occupy the terminal. Use a second terminal for curl.
+
+`server_nat_host` binds every interface and prints the LAN IPv4 to put in the other machine's `Networking.json` (`ip` / `port`). Same Wi-Fi or ethernet segment; not the public internet.
 
 If you see `bind: address already in use`:
 

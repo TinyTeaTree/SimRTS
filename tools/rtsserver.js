@@ -3,6 +3,7 @@
 
 const { spawnSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -162,9 +163,71 @@ function runGo(goBin, args, opts = {}) {
   }
 }
 
+function isPrivateIPv4(address) {
+  const parts = address.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n))) {
+    return false;
+  }
+  const [a, b] = parts;
+  return a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+}
+
+function isIPv4(addr) {
+  return addr.family === 'IPv4' || addr.family === 4;
+}
+
+function lanIPv4s() {
+  const found = [];
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+    for (const addr of addrs || []) {
+      if (!addr || addr.internal || !isIPv4(addr)) {
+        continue;
+      }
+      if (addr.address.startsWith('169.254.')) {
+        continue;
+      }
+      found.push({ name, address: addr.address, private: isPrivateIPv4(addr.address) });
+    }
+  }
+  found.sort((a, b) => {
+    if (a.private !== b.private) {
+      return a.private ? -1 : 1;
+    }
+    // Wi-Fi is often en0 on Mac; prefer cable / other NICs when both exist.
+    const aWifi = a.name === 'en0' ? 1 : 0;
+    const bWifi = b.name === 'en0' ? 1 : 0;
+    return aWifi - bWifi;
+  });
+  return found;
+}
+
+function printLanReachable(lanAddrs) {
+  if (lanAddrs.length === 0) {
+    fail(
+      'No LAN IPv4 address found.\n' +
+        '    Connect ethernet or Wi-Fi, then re-run.'
+    );
+  }
+
+  const primary = lanAddrs[0];
+  console.log(`==> RTSServer LAN host (bind 0.0.0.0:${LOCAL_PORT})`);
+  console.log(`    this machine : http://127.0.0.1:${LOCAL_PORT}`);
+  console.log(`    LAN          : http://${primary.address}:${LOCAL_PORT}  (${primary.name})`);
+  if (lanAddrs.length > 1) {
+    for (const extra of lanAddrs.slice(1)) {
+      console.log(`    also         : http://${extra.address}:${LOCAL_PORT}  (${extra.name})`);
+    }
+  }
+  console.log('');
+  console.log('    Other computers on this network — Networking.json:');
+  console.log(`        "ip": "${primary.address}",`);
+  console.log(`        "port": ${LOCAL_PORT}`);
+  console.log('');
+}
+
 const mode = process.argv[2];
-if (mode !== 'build' && mode !== 'local' && mode !== 'shutdown') {
-  fail('Usage: node tools/rtsserver.js build|local|shutdown');
+if (mode !== 'build' && mode !== 'local' && mode !== 'nat' && mode !== 'shutdown') {
+  fail('Usage: node tools/rtsserver.js build|local|nat|shutdown');
 }
 
 if (!fs.existsSync(SERVER_DIR)) {
@@ -196,5 +259,17 @@ if (mode === 'build') {
   process.exit(0);
 }
 
-console.log(`==> RTSServer local host (127.0.0.1:${LOCAL_PORT})`);
-runGo(go.bin, ['run', '.', '-bind', '127.0.0.1', '-port', String(LOCAL_PORT)]);
+if (mode === 'nat') {
+  const lanAddrs = lanIPv4s();
+  printLanReachable(lanAddrs);
+  runGo(go.bin, ['run', '.', '-bind', '0.0.0.0', '-port', String(LOCAL_PORT)]);
+  process.exit(0);
+}
+
+if (mode === 'local') {
+  console.log(`==> RTSServer local host (127.0.0.1:${LOCAL_PORT})`);
+  runGo(go.bin, ['run', '.', '-bind', '127.0.0.1', '-port', String(LOCAL_PORT)]);
+  process.exit(0);
+}
+
+fail('Usage: node tools/rtsserver.js build|local|nat|shutdown');
