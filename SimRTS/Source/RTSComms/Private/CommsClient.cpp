@@ -1,6 +1,8 @@
 #include "CommsClient.h"
 #include "CommsSockets.h"
 
+#include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <condition_variable>
 #include <mutex>
@@ -302,6 +304,170 @@ CommsResult FromHttp(const HttpResponse& http, CommsEventKind kind) {
 	return result;
 }
 
+constexpr char kUdpMagic[] = {'R', 'T', 'S', '1'};
+constexpr int kUdpMaxPacket = 1200;
+constexpr int kUdpMaxIdLen = 64;
+constexpr uint8_t kUdpHello = 1;
+constexpr uint8_t kUdpAck = 2;
+constexpr uint8_t kUdpOrder = 3;
+
+void PutU8(std::vector<uint8_t>& out, uint8_t value) {
+	out.push_back(value);
+}
+
+void PutI32(std::vector<uint8_t>& out, int32_t value) {
+	const uint32_t u = static_cast<uint32_t>(value);
+	out.push_back(static_cast<uint8_t>(u));
+	out.push_back(static_cast<uint8_t>(u >> 8));
+	out.push_back(static_cast<uint8_t>(u >> 16));
+	out.push_back(static_cast<uint8_t>(u >> 24));
+}
+
+void PutU16(std::vector<uint8_t>& out, uint16_t value) {
+	out.push_back(static_cast<uint8_t>(value));
+	out.push_back(static_cast<uint8_t>(value >> 8));
+}
+
+bool PutStr(std::vector<uint8_t>& out, const std::string& value) {
+	if (value.size() > kUdpMaxIdLen) {
+		return false;
+	}
+	out.push_back(static_cast<uint8_t>(value.size()));
+	out.insert(out.end(), value.begin(), value.end());
+	return true;
+}
+
+bool ReadStr(const uint8_t* data, int size, int& off, std::string& out) {
+	if (off >= size) {
+		return false;
+	}
+	const int n = data[off];
+	++off;
+	if (n > kUdpMaxIdLen || off + n > size) {
+		return false;
+	}
+	out.assign(reinterpret_cast<const char*>(data + off), static_cast<size_t>(n));
+	off += n;
+	return true;
+}
+
+bool ReadU8(const uint8_t* data, int size, int& off, uint8_t& out) {
+	if (off >= size) {
+		return false;
+	}
+	out = data[off];
+	++off;
+	return true;
+}
+
+bool ReadU16(const uint8_t* data, int size, int& off, uint16_t& out) {
+	if (off + 2 > size) {
+		return false;
+	}
+	out = static_cast<uint16_t>(data[off] | (data[off + 1] << 8));
+	off += 2;
+	return true;
+}
+
+bool ReadI32(const uint8_t* data, int size, int& off, int32_t& out) {
+	if (off + 4 > size) {
+		return false;
+	}
+	const uint32_t u = static_cast<uint32_t>(data[off])
+		| (static_cast<uint32_t>(data[off + 1]) << 8)
+		| (static_cast<uint32_t>(data[off + 2]) << 16)
+		| (static_cast<uint32_t>(data[off + 3]) << 24);
+	out = static_cast<int32_t>(u);
+	off += 4;
+	return true;
+}
+
+bool DecodeUdpHeader(
+	const uint8_t* data,
+	int size,
+	uint8_t& kind,
+	std::string& room_id,
+	std::string& player_id,
+	std::string& token,
+	int& off) {
+	if (size < 5 || data[0] != 'R' || data[1] != 'T' || data[2] != 'S' || data[3] != '1') {
+		return false;
+	}
+	kind = data[4];
+	off = 5;
+	if (!ReadStr(data, size, off, room_id) || !ReadStr(data, size, off, player_id)) {
+		return false;
+	}
+	token.clear();
+	if (kind == kUdpHello && !ReadStr(data, size, off, token)) {
+		return false;
+	}
+	return true;
+}
+
+bool DecodeUdpOrderBody(const uint8_t* data, int size, int off, CommsOrder& order) {
+	uint8_t type = 0;
+	uint8_t is_next = 0;
+	uint16_t count = 0;
+	if (!ReadU8(data, size, off, type) || !ReadU8(data, size, off, is_next)) {
+		return false;
+	}
+	if (!ReadI32(data, size, off, order.target_x) || !ReadI32(data, size, off, order.target_y)) {
+		return false;
+	}
+	if (!ReadU16(data, size, off, count)) {
+		return false;
+	}
+	order.type = type;
+	order.is_next = is_next != 0;
+	order.unit_ids.clear();
+	order.unit_ids.reserve(count);
+	for (uint16_t i = 0; i < count; ++i) {
+		int32_t id = 0;
+		if (!ReadI32(data, size, off, id)) {
+			return false;
+		}
+		order.unit_ids.push_back(id);
+	}
+	return ReadI32(data, size, off, order.sim_player_id);
+}
+
+bool EncodeUdpHello(const std::string& room_id, const std::string& player_id, const std::string& token, std::vector<uint8_t>& out) {
+	out.clear();
+	out.insert(out.end(), kUdpMagic, kUdpMagic + 4);
+	PutU8(out, kUdpHello);
+	if (!PutStr(out, room_id) || !PutStr(out, player_id) || !PutStr(out, token)) {
+		return false;
+	}
+	return out.size() <= kUdpMaxPacket;
+}
+
+bool EncodeUdpOrder(
+	const std::string& room_id,
+	const std::string& player_id,
+	const CommsOrder& order,
+	std::vector<uint8_t>& out) {
+	if (order.unit_ids.size() > 64) {
+		return false;
+	}
+	out.clear();
+	out.insert(out.end(), kUdpMagic, kUdpMagic + 4);
+	PutU8(out, kUdpOrder);
+	if (!PutStr(out, room_id) || !PutStr(out, player_id)) {
+		return false;
+	}
+	PutU8(out, order.type);
+	PutU8(out, order.is_next ? 1 : 0);
+	PutI32(out, order.target_x);
+	PutI32(out, order.target_y);
+	PutU16(out, static_cast<uint16_t>(order.unit_ids.size()));
+	for (int32_t id : order.unit_ids) {
+		PutI32(out, id);
+	}
+	PutI32(out, order.sim_player_id);
+	return out.size() <= kUdpMaxPacket;
+}
+
 } // namespace
 
 struct CommsRequest {
@@ -312,9 +478,11 @@ struct CommsRequest {
 struct CommsClient::Impl {
 	std::string host = "127.0.0.1";
 	int port = 8080;
+	int udp_port = 8081;
 
 	mutable std::mutex session_mu;
 	CommsSession session;
+	std::string joined_room;
 
 	std::mutex request_mu;
 	std::condition_variable request_cv;
@@ -322,9 +490,17 @@ struct CommsClient::Impl {
 	bool stop = false;
 	bool running = false;
 	std::thread worker;
+	std::thread udp_worker;
 
 	std::mutex result_mu;
 	std::queue<CommsEvent> results;
+
+	UdpSocket udp_socket = kInvalidUdp;
+	std::mutex udp_mu;
+	std::condition_variable udp_cv;
+	std::queue<std::vector<uint8_t>> udp_out;
+	std::string hello_room;
+	bool hello_acked = false;
 
 	void Enqueue(CommsRequest request) {
 		{
@@ -347,6 +523,148 @@ struct CommsClient::Impl {
 	void StoreSession(CommsSession next) {
 		std::lock_guard<std::mutex> lock(session_mu);
 		session = std::move(next);
+	}
+
+	void QueueUdp(std::vector<uint8_t> packet) {
+		std::lock_guard<std::mutex> lock(udp_mu);
+		udp_out.push(std::move(packet));
+	}
+
+	bool EnsureUdp(std::string* error) {
+		std::lock_guard<std::mutex> lock(udp_mu);
+		if (udp_socket != kInvalidUdp) {
+			return true;
+		}
+		std::string init_error;
+		if (!TcpInit(&init_error)) {
+			if (error != nullptr) {
+				*error = init_error;
+			}
+			return false;
+		}
+		udp_socket = UdpOpenBind(error);
+		return udp_socket != kInvalidUdp;
+	}
+
+	void DrainUdpOut() {
+		std::string host_copy;
+		int udp_port_copy = 0;
+		{
+			std::lock_guard<std::mutex> lock(session_mu);
+			host_copy = host;
+			udp_port_copy = udp_port;
+		}
+		for (;;) {
+			std::vector<uint8_t> packet;
+			{
+				std::lock_guard<std::mutex> lock(udp_mu);
+				if (udp_out.empty() || udp_socket == kInvalidUdp) {
+					return;
+				}
+				packet = std::move(udp_out.front());
+				udp_out.pop();
+			}
+			UdpSendTo(
+				udp_socket,
+				host_copy.c_str(),
+				static_cast<uint16_t>(udp_port_copy),
+				reinterpret_cast<const char*>(packet.data()),
+				static_cast<int>(packet.size()),
+				nullptr);
+		}
+	}
+
+	void HandleUdpPacket(const uint8_t* data, int size) {
+		uint8_t kind = 0;
+		std::string room_id;
+		std::string player_id;
+		std::string token;
+		int off = 0;
+		if (!DecodeUdpHeader(data, size, kind, room_id, player_id, token, off)) {
+			return;
+		}
+		if (kind == kUdpAck) {
+			std::lock_guard<std::mutex> lock(udp_mu);
+			if (room_id == hello_room) {
+				hello_acked = true;
+			}
+			udp_cv.notify_all();
+			return;
+		}
+		if (kind != kUdpOrder) {
+			return;
+		}
+		CommsEvent event;
+		event.kind = CommsEventKind::Order;
+		event.result.ok = DecodeUdpOrderBody(data, size, off, event.result.order);
+		event.result.session.player_id = std::move(player_id);
+		event.result.room.id = std::move(room_id);
+		if (!event.result.ok) {
+			event.result.error = "malformed udp order";
+		}
+		Push(std::move(event));
+	}
+
+	void UdpLoop() {
+		char buf[kUdpMaxPacket];
+		while (true) {
+			{
+				std::lock_guard<std::mutex> lock(request_mu);
+				if (stop) {
+					return;
+				}
+			}
+			DrainUdpOut();
+			UdpSocket socket = kInvalidUdp;
+			{
+				std::lock_guard<std::mutex> lock(udp_mu);
+				socket = udp_socket;
+			}
+			if (socket == kInvalidUdp) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+				continue;
+			}
+			const int n = UdpRecv(socket, buf, sizeof(buf));
+			if (n > 0) {
+				HandleUdpPacket(reinterpret_cast<const uint8_t*>(buf), n);
+			}
+		}
+	}
+
+	bool HelloForJoin(const std::string& room_id, std::string& error) {
+		if (!EnsureUdp(&error)) {
+			return false;
+		}
+		const CommsSession current = CopySession();
+		std::vector<uint8_t> hello;
+		if (!EncodeUdpHello(room_id, current.player_id, current.session_token, hello)) {
+			error = "udp hello encode failed";
+			return false;
+		}
+		{
+			std::lock_guard<std::mutex> lock(udp_mu);
+			hello_room = room_id;
+			hello_acked = false;
+		}
+		for (int attempt = 0; attempt < 20; ++attempt) {
+			{
+				std::lock_guard<std::mutex> lock(request_mu);
+				if (stop) {
+					error = "stopped";
+					return false;
+				}
+			}
+			QueueUdp(hello);
+			std::unique_lock<std::mutex> lock(udp_mu);
+			if (udp_cv.wait_for(lock, std::chrono::milliseconds(100), [this] { return hello_acked; })) {
+				lock.unlock();
+				std::lock_guard<std::mutex> session_lock(session_mu);
+				joined_room = room_id;
+				return true;
+			}
+		}
+		error = "udp hello timeout";
+		return false;
 	}
 
 	CommsResult Execute(const CommsRequest& request) {
@@ -390,6 +708,19 @@ struct CommsClient::Impl {
 		if (request.kind == CommsEventKind::Login && result.ok) {
 			StoreSession(result.session);
 		}
+		if (request.kind == CommsEventKind::JoinRoom && result.ok) {
+			std::string udp_error;
+			if (!HelloForJoin(request.arg, udp_error)) {
+				result.ok = false;
+				result.error = udp_error;
+			} else if (result.room.id.empty()) {
+				result.room.id = request.arg;
+			}
+		}
+		if (request.kind == CommsEventKind::LeaveRoom && result.ok) {
+			std::lock_guard<std::mutex> lock(session_mu);
+			joined_room.clear();
+		}
 		return result;
 	}
 
@@ -419,10 +750,11 @@ CommsClient::~CommsClient() {
 	Stop();
 }
 
-void CommsClient::SetHost(std::string host, int port) {
+void CommsClient::SetHost(std::string host, int port, int udp_port) {
 	std::lock_guard<std::mutex> lock(impl_->session_mu);
 	impl_->host = std::move(host);
 	impl_->port = port;
+	impl_->udp_port = udp_port;
 }
 
 void CommsClient::Start() {
@@ -437,6 +769,7 @@ void CommsClient::Start() {
 	}
 	if (launch) {
 		impl_->worker = std::thread([this] { impl_->WorkerLoop(); });
+		impl_->udp_worker = std::thread([this] { impl_->UdpLoop(); });
 	}
 }
 
@@ -449,8 +782,19 @@ void CommsClient::Stop() {
 		impl_->stop = true;
 	}
 	impl_->request_cv.notify_all();
+	impl_->udp_cv.notify_all();
+	{
+		std::lock_guard<std::mutex> lock(impl_->udp_mu);
+		if (impl_->udp_socket != kInvalidUdp) {
+			TcpClose(impl_->udp_socket);
+			impl_->udp_socket = kInvalidUdp;
+		}
+	}
 	if (impl_->worker.joinable()) {
 		impl_->worker.join();
+	}
+	if (impl_->udp_worker.joinable()) {
+		impl_->udp_worker.join();
 	}
 	std::lock_guard<std::mutex> lock(impl_->request_mu);
 	impl_->running = false;
@@ -479,6 +823,25 @@ void CommsClient::JoinRoom(std::string room_id) {
 void CommsClient::LeaveRoom(std::string room_id) {
 	Start();
 	impl_->Enqueue({CommsEventKind::LeaveRoom, std::move(room_id)});
+}
+
+void CommsClient::SendOrder(CommsOrder order) {
+	Start();
+	std::string room_id;
+	std::string player_id;
+	{
+		std::lock_guard<std::mutex> lock(impl_->session_mu);
+		room_id = impl_->joined_room;
+		player_id = impl_->session.player_id;
+	}
+	if (room_id.empty() || player_id.empty()) {
+		return;
+	}
+	std::vector<uint8_t> packet;
+	if (!EncodeUdpOrder(room_id, player_id, order, packet)) {
+		return;
+	}
+	impl_->QueueUdp(std::move(packet));
 }
 
 bool CommsClient::TryPop(CommsEvent& out) {

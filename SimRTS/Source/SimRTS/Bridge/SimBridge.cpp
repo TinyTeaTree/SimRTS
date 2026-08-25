@@ -50,9 +50,15 @@ bool FSimBridge::ResetToDefaultLevel()
 	return true;
 }
 
-void FSimBridge::SubmitMoveOrder(const TArray<int32>& UnitIds, int32 TargetX, int32 TargetY, bool bIsNext)
+void FSimBridge::SubmitMoveOrder(
+	const TArray<int32>& UnitIds,
+	int32 TargetX,
+	int32 TargetY,
+	bool bIsNext,
+	int32 PlayerId)
 {
 	SimRTS::Order Order;
+	Order.player_id = PlayerId;
 	Order.type = SimRTS::OrderType::Move;
 	Order.target = {TargetX, TargetY};
 	Order.is_next = bIsNext;

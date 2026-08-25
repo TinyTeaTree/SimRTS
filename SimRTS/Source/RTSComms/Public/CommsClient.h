@@ -18,7 +18,7 @@ public:
 	CommsClient(const CommsClient&) = delete;
 	CommsClient& operator=(const CommsClient&) = delete;
 
-	void SetHost(std::string host, int port);
+	void SetHost(std::string host, int port, int udp_port = 8081);
 
 	void Start();
 	void Stop();
@@ -28,6 +28,7 @@ public:
 	void CreateRoom(std::string room_id);
 	void JoinRoom(std::string room_id);
 	void LeaveRoom(std::string room_id);
+	void SendOrder(CommsOrder order);
 
 	bool TryPop(CommsEvent& out);
 

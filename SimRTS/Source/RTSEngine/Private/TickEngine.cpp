@@ -322,10 +322,12 @@ void EnqueuePathForUnit(
     Vec2i requested_goal,
     bool first_is_next,
     const PathingGrid& pathing,
-    int32_t diameter) {
+    int32_t diameter,
+    PlayerId player_id) {
     const PathFindResult found = FindMoveWaypoints(start, requested_goal, pathing, diameter);
     for (size_t i = 0; i < found.waypoints.size(); ++i) {
         Order segment;
+        segment.player_id = player_id;
         segment.type = OrderType::Move;
         segment.unit_ids = {unit_id};
         segment.target = found.waypoints[i];
@@ -441,7 +443,8 @@ void TickEngine::SubmitOrder(Order order) {
             goal,
             queue_as_next,
             static_data_.pathing,
-            DiameterForUnit(unit, static_data_));
+            DiameterForUnit(unit, static_data_),
+            order.player_id);
     }
 }
 

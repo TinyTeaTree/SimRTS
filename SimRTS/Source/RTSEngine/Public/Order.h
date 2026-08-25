@@ -8,6 +8,7 @@ namespace SimRTS {
 
 // Live battle data: pending order consumed by the tick engine.
 struct Order {
+    PlayerId player_id = 0;
     std::vector<UnitId> unit_ids;
     OrderType type = OrderType::Move;
     Vec2i target; // Move destination in discrete world points

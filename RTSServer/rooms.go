@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"sync"
 )
@@ -11,13 +12,19 @@ type Room struct {
 	PlayerIDs []string `json:"player_ids"`
 }
 
+type storedRoom struct {
+	ID        string
+	PlayerIDs []string
+	Addrs     map[string]*net.UDPAddr
+}
+
 type RoomStore struct {
 	mu    sync.Mutex
-	rooms map[string]*Room
+	rooms map[string]*storedRoom
 }
 
 func NewRoomStore() *RoomStore {
-	return &RoomStore{rooms: make(map[string]*Room)}
+	return &RoomStore{rooms: make(map[string]*storedRoom)}
 }
 
 func (s *RoomStore) List() []Room {
@@ -26,7 +33,7 @@ func (s *RoomStore) List() []Room {
 
 	out := make([]Room, 0, len(s.rooms))
 	for _, room := range s.rooms {
-		out = append(out, cloneRoom(room))
+		out = append(out, snapshotRoom(room))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -39,12 +46,24 @@ func (s *RoomStore) Create(id string) (Room, error) {
 	if _, exists := s.rooms[id]; exists {
 		return Room{}, fmt.Errorf("room already exists")
 	}
-	room := &Room{ID: id, PlayerIDs: []string{}}
+	room := &storedRoom{ID: id, PlayerIDs: []string{}, Addrs: map[string]*net.UDPAddr{}}
 	s.rooms[id] = room
-	return cloneRoom(room), nil
+	return snapshotRoom(room), nil
 }
 
-func (s *RoomStore) Join(roomID, playerID string) (Room, error) {
+func (s *RoomStore) Get(id string) (Room, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room, ok := s.rooms[id]
+	if !ok {
+		return Room{}, fmt.Errorf("room not found")
+	}
+	return snapshotRoom(room), nil
+}
+
+// Seat adds the player on first UDP Hello and maps their datagram address.
+func (s *RoomStore) Seat(roomID, playerID string, addr *net.UDPAddr) (Room, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -52,12 +71,37 @@ func (s *RoomStore) Join(roomID, playerID string) (Room, error) {
 	if !ok {
 		return Room{}, fmt.Errorf("room not found")
 	}
-	if contains(room.PlayerIDs, playerID) {
-		return cloneRoom(room), nil
+	if !contains(room.PlayerIDs, playerID) {
+		room.PlayerIDs = append(room.PlayerIDs, playerID)
+		sort.Strings(room.PlayerIDs)
 	}
-	room.PlayerIDs = append(room.PlayerIDs, playerID)
-	sort.Strings(room.PlayerIDs)
-	return cloneRoom(room), nil
+	if addr != nil {
+		copied := *addr
+		room.Addrs[playerID] = &copied
+	}
+	return snapshotRoom(room), nil
+}
+
+func (s *RoomStore) RelayAddrs(roomID, senderID string) ([]*net.UDPAddr, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room, ok := s.rooms[roomID]
+	if !ok {
+		return nil, fmt.Errorf("room not found")
+	}
+	if !contains(room.PlayerIDs, senderID) {
+		return nil, fmt.Errorf("player not in room")
+	}
+	out := make([]*net.UDPAddr, 0, len(room.Addrs))
+	for _, addr := range room.Addrs {
+		if addr == nil {
+			continue
+		}
+		copied := *addr
+		out = append(out, &copied)
+	}
+	return out, nil
 }
 
 func (s *RoomStore) Leave(roomID, playerID string) (Room, error) {
@@ -81,10 +125,11 @@ func (s *RoomStore) Leave(roomID, playerID string) (Room, error) {
 		return Room{}, fmt.Errorf("player not in room")
 	}
 	room.PlayerIDs = next
-	return cloneRoom(room), nil
+	delete(room.Addrs, playerID)
+	return snapshotRoom(room), nil
 }
 
-func cloneRoom(room *Room) Room {
+func snapshotRoom(room *storedRoom) Room {
 	players := make([]string, len(room.PlayerIDs))
 	copy(players, room.PlayerIDs)
 	return Room{ID: room.ID, PlayerIDs: players}

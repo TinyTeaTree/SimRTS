@@ -35,6 +35,39 @@ FSimRTSCommsRoomView MakeRoomView(const SimRTS::CommsRoom& Room)
 	return View;
 }
 
+int32 SimPlayerIdFromLogin(const std::string& Id)
+{
+	uint32 Hash = 2166136261u;
+	for (unsigned char Character : Id)
+	{
+		Hash ^= Character;
+		Hash *= 16777619u;
+	}
+	const int32 Value = static_cast<int32>(Hash);
+	return Value == 0 ? 1 : Value;
+}
+
+void RelayMoveOrder(
+	SimRTS::CommsClient& Comms,
+	const TArray<int32>& UnitIds,
+	int32 TargetX,
+	int32 TargetY,
+	bool bIsNext)
+{
+	SimRTS::CommsOrder Order;
+	Order.sim_player_id = SimPlayerIdFromLogin(Comms.PlayerId());
+	Order.target_x = TargetX;
+	Order.target_y = TargetY;
+	Order.type = 0;
+	Order.is_next = bIsNext;
+	Order.unit_ids.reserve(UnitIds.Num());
+	for (int32 Id : UnitIds)
+	{
+		Order.unit_ids.push_back(Id);
+	}
+	Comms.SendOrder(std::move(Order));
+}
+
 } // namespace
 
 ASimRTSGameMode::ASimRTSGameMode()
@@ -66,11 +99,12 @@ void ASimRTSGameMode::BeginPlay()
 	else
 	{
 		MockTickLag = Networking.Config.MockTickLag;
-		Comms.SetHost(FStringToComms(Networking.Config.Ip), Networking.Config.Port);
+		Comms.SetHost(FStringToComms(Networking.Config.Ip), Networking.Config.Port, Networking.Config.UdpPort);
 		Comms.Start();
-		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d mock_tick_lag=%d"),
+		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d udp=%d mock_tick_lag=%d"),
 			*Networking.Config.Ip,
 			Networking.Config.Port,
+			Networking.Config.UdpPort,
 			MockTickLag);
 	}
 
@@ -113,6 +147,12 @@ void ASimRTSGameMode::Tick(float DeltaSeconds)
 
 bool ASimRTSGameMode::StartDefaultRoom()
 {
+	if (JoinedMatchmakingRoomId.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("SimRTS GameMode: join a relay room before starting."));
+		return false;
+	}
+
 	if (Room == nullptr)
 	{
 		return false;
@@ -176,14 +216,14 @@ void ASimRTSGameMode::SetMatchmakingMenuOpen(bool bOpen)
 
 void ASimRTSGameMode::SubmitMoveOrder(const TArray<int32>& UnitIds, int32 TargetX, int32 TargetY, bool bIsNext)
 {
-	if (!IsRoomLoaded() || UnitIds.Num() == 0)
+	if (!IsRoomLoaded() || JoinedMatchmakingRoomId.IsEmpty() || UnitIds.Num() == 0)
 	{
 		return;
 	}
 
 	if (MockTickLag <= 0)
 	{
-		GetBridge().SubmitMoveOrder(UnitIds, TargetX, TargetY, bIsNext);
+		RelayMoveOrder(Comms, UnitIds, TargetX, TargetY, bIsNext);
 		return;
 	}
 
@@ -192,7 +232,7 @@ void ASimRTSGameMode::SubmitMoveOrder(const TArray<int32>& UnitIds, int32 Target
 	Delayed.TargetX = TargetX;
 	Delayed.TargetY = TargetY;
 	Delayed.bIsNext = bIsNext;
-	Delayed.ApplyAtTick = GetBridge().GetTick() + MockTickLag;
+	Delayed.SendAtTick = GetBridge().GetTick() + MockTickLag;
 	DelayedMoveOrders.Add(MoveTemp(Delayed));
 }
 
@@ -207,12 +247,12 @@ void ASimRTSGameMode::FlushDelayedMoveOrders()
 	for (int32 Index = DelayedMoveOrders.Num() - 1; Index >= 0; --Index)
 	{
 		const FDelayedMoveOrder& Delayed = DelayedMoveOrders[Index];
-		if (CurrentTick < Delayed.ApplyAtTick)
+		if (CurrentTick < Delayed.SendAtTick)
 		{
 			continue;
 		}
 
-		GetBridge().SubmitMoveOrder(Delayed.UnitIds, Delayed.TargetX, Delayed.TargetY, Delayed.bIsNext);
+		RelayMoveOrder(Comms, Delayed.UnitIds, Delayed.TargetX, Delayed.TargetY, Delayed.bIsNext);
 		DelayedMoveOrders.RemoveAt(Index);
 	}
 }
@@ -237,6 +277,26 @@ void ASimRTSGameMode::PumpComms()
 	SimRTS::CommsEvent Event;
 	while (Comms.TryPop(Event))
 	{
+		if (Event.kind == SimRTS::CommsEventKind::Order)
+		{
+			if (Event.result.ok && IsRoomLoaded())
+			{
+				TArray<int32> UnitIds;
+				UnitIds.Reserve(static_cast<int32>(Event.result.order.unit_ids.size()));
+				for (int32_t Id : Event.result.order.unit_ids)
+				{
+					UnitIds.Add(Id);
+				}
+				GetBridge().SubmitMoveOrder(
+					UnitIds,
+					Event.result.order.target_x,
+					Event.result.order.target_y,
+					Event.result.order.is_next,
+					Event.result.order.sim_player_id);
+			}
+			continue;
+		}
+
 		const FSimRTSCommsEventView View = MakeCommsView(Event);
 
 		if (Event.kind == SimRTS::CommsEventKind::CreateRoom && Event.result.ok)
@@ -249,10 +309,16 @@ void ASimRTSGameMode::PumpComms()
 		if (Event.kind == SimRTS::CommsEventKind::JoinRoom && Event.result.ok)
 		{
 			JoinedMatchmakingRoomId = View.Room.Id;
+			if (JoinedMatchmakingRoomId.IsEmpty())
+			{
+				JoinedMatchmakingRoomId = CommsToFString(Event.result.room.id);
+			}
+			Comms.GetRooms();
 		}
 		else if (Event.kind == SimRTS::CommsEventKind::LeaveRoom && Event.result.ok)
 		{
 			JoinedMatchmakingRoomId.Empty();
+			DelayedMoveOrders.Reset();
 		}
 
 		if (Event.kind != SimRTS::CommsEventKind::GetRooms)
@@ -300,6 +366,9 @@ FSimRTSCommsEventView ASimRTSGameMode::MakeCommsView(const SimRTS::CommsEvent& E
 		break;
 	case SimRTS::CommsEventKind::LeaveRoom:
 		View.Kind = ESimRTSCommsKind::LeaveRoom;
+		break;
+	case SimRTS::CommsEventKind::Order:
+		View.Kind = ESimRTSCommsKind::JoinRoom;
 		break;
 	}
 

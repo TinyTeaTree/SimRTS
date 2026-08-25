@@ -65,8 +65,8 @@ func TestLoginAndAuthedRooms(t *testing.T) {
 	if err := json.Unmarshal(joinRec.Body.Bytes(), &room); err != nil {
 		t.Fatalf("join json: %v", err)
 	}
-	if len(room.PlayerIDs) != 1 || room.PlayerIDs[0] != session.PlayerID {
-		t.Fatalf("joined as %#v want %s", room.PlayerIDs, session.PlayerID)
+	if len(room.PlayerIDs) != 0 {
+		t.Fatalf("HTTP JoinRoom must not seat the player yet, got %#v", room.PlayerIDs)
 	}
 }
 

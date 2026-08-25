@@ -12,11 +12,11 @@ func TestRoomLifecycle(t *testing.T) {
 		t.Fatal("expected duplicate create to fail")
 	}
 
-	room, err := store.Join("alpha", "p2")
+	room, err := store.Seat("alpha", "p2", nil)
 	if err != nil {
 		t.Fatalf("join p2: %v", err)
 	}
-	room, err = store.Join("alpha", "p1")
+	room, err = store.Seat("alpha", "p1", nil)
 	if err != nil {
 		t.Fatalf("join p1: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestRoomLifecycle(t *testing.T) {
 		t.Fatalf("players = %#v", room.PlayerIDs)
 	}
 
-	again, err := store.Join("alpha", "p1")
+	again, err := store.Seat("alpha", "p1", nil)
 	if err != nil {
 		t.Fatalf("idempotent join: %v", err)
 	}

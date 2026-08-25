@@ -12,7 +12,12 @@ public:
 	/** Load DefaultLevel + GameRules + DefaultSpawns JSON. Returns false if missing or invalid. */
 	bool ResetToDefaultLevel();
 
-	void SubmitMoveOrder(const TArray<int32>& UnitIds, int32 TargetX, int32 TargetY, bool bIsNext = false);
+	void SubmitMoveOrder(
+		const TArray<int32>& UnitIds,
+		int32 TargetX,
+		int32 TargetY,
+		bool bIsNext = false,
+		int32 PlayerId = 0);
 	void StepForward();
 
 	int32 GetTick() const;

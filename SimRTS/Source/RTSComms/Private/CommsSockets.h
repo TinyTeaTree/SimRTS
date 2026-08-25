@@ -1,6 +1,6 @@
 #pragma once
 
-// Private TCP shim. Only CommsClient.cpp includes this.
+// Private TCP/UDP shim. Only CommsClient.cpp includes this.
 // Windows = WinSock2, Mac = POSIX.
 
 #include <cstdint>
@@ -22,6 +22,7 @@ inline constexpr TcpSocket kInvalidTcp = INVALID_SOCKET;
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sys/time.h>
 #include <cerrno>
 #include <cstring>
 using TcpSocket = int;
@@ -123,5 +124,91 @@ inline int TcpRecvSome(TcpSocket socket, char* buffer, int capacity) {
 	return ::recv(socket, buffer, capacity, 0);
 #else
 	return static_cast<int>(::recv(socket, buffer, static_cast<size_t>(capacity), 0));
+#endif
+}
+
+using UdpSocket = TcpSocket;
+inline constexpr UdpSocket kInvalidUdp = kInvalidTcp;
+
+inline UdpSocket UdpOpenBind(std::string* error) {
+	const UdpSocket socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (socket == kInvalidUdp) {
+		if (error != nullptr) {
+			*error = "udp socket: " + TcpLastError();
+		}
+		return kInvalidUdp;
+	}
+
+	sockaddr_in addr{};
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	addr.sin_port = 0;
+	if (bind(socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+		if (error != nullptr) {
+			*error = "udp bind: " + TcpLastError();
+		}
+		TcpClose(socket);
+		return kInvalidUdp;
+	}
+
+#ifdef _WIN32
+	DWORD timeout_ms = 50;
+	setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+#else
+	timeval timeout{};
+	timeout.tv_sec = 0;
+	timeout.tv_usec = 50000;
+	setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+#endif
+	return socket;
+}
+
+inline bool UdpSendTo(
+	UdpSocket socket,
+	const char* host,
+	uint16_t port,
+	const char* data,
+	int length,
+	std::string* error) {
+	sockaddr_in addr{};
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(port);
+	if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
+		if (error != nullptr) {
+			*error = "invalid IPv4 host";
+		}
+		return false;
+	}
+#ifdef _WIN32
+	const int n = ::sendto(socket, data, length, 0, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+	if (n == SOCKET_ERROR || n != length) {
+		if (error != nullptr) {
+			*error = "udp send: " + TcpLastError();
+		}
+		return false;
+	}
+#else
+	const ssize_t n = ::sendto(
+		socket,
+		data,
+		static_cast<size_t>(length),
+		0,
+		reinterpret_cast<sockaddr*>(&addr),
+		sizeof(addr));
+	if (n != length) {
+		if (error != nullptr) {
+			*error = "udp send: " + TcpLastError();
+		}
+		return false;
+	}
+#endif
+	return true;
+}
+
+inline int UdpRecv(UdpSocket socket, char* buffer, int capacity) {
+#ifdef _WIN32
+	return ::recvfrom(socket, buffer, capacity, 0, nullptr, nullptr);
+#else
+	return static_cast<int>(::recvfrom(socket, buffer, static_cast<size_t>(capacity), 0, nullptr, nullptr));
 #endif
 }

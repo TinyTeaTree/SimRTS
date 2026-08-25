@@ -23,7 +23,7 @@ struct FDelayedMoveOrder
 	int32 TargetX = 0;
 	int32 TargetY = 0;
 	bool bIsNext = false;
-	int32 ApplyAtTick = 0;
+	int32 SendAtTick = 0;
 };
 
 UCLASS()
@@ -61,7 +61,7 @@ public:
 
 	void SetMatchmakingMenuOpen(bool bOpen);
 
-	/** Move order from input. mock_tick_lag 0 applies now; otherwise queues until that many sim ticks. */
+	/** Queue a move for the UDP relay after mock_tick_lag ticks. Applied when the order bounces back. */
 	void SubmitMoveOrder(const TArray<int32>& UnitIds, int32 TargetX, int32 TargetY, bool bIsNext);
 	void FlushDelayedMoveOrders();
 

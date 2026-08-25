@@ -6,7 +6,7 @@ When the user names a type (Simulation / Engine / Comms / Server), follow **Shar
 
 - **Do not run git.** No `git status`, commit, push, checkout, or any other git command. The user owns version control.
 - **Do not run npm.** No `npm run compile`, `compile_open`, `compile:hot`, `open`, `server_build`, `server_local_host`, `server_nat_host`, `server_shutdown`, or other npm scripts. The user compiles, opens the editor, and starts/stops the server.
-- Do not start or kill Unreal Editor, `rtsserver`, or bind port 8080.
+- Do not start or kill Unreal Editor, `rtsserver`, or bind port 8080/8081.
 - Prefer the smallest change that matches existing style. Do not add Unreal NetDriver, Steam, or EOS.
 - Casts: follow [`Rules.md`](Rules.md) (no ceremonial `static_cast`).
 
@@ -52,7 +52,7 @@ Vendor-agnostic matchmaking **client**. Talks HTTP to RTSServer. Not the sim, no
 - Pure C++ (STL + private TCP shim in `CommsSockets.h` only). No Unreal HTTP/Json, no `UObject`.
 - Public API never blocks: `Login` / `GetRooms` / `CreateRoom` / `JoinRoom` / `LeaveRoom` enqueue and return. Completions via `TryPop` only. No callbacks from the I/O thread.
 - One I/O worker thread may block on HTTP. Session token, player id, and nickname live on `CommsClient` after Login. Join/Leave send room `id` only; the worker attaches `X-Session-Token`.
-- HTTP/1.0 over TCP. No TLS, retries, or UDP in this module yet. Keep sync messages on a path that can stay within one MTU later (lockstep frames are not this module’s job today).
+- HTTP/1.0 over TCP plus UDP relay (Hello/Ack/Order) on a second port. Public API never blocks. Keep sync messages within one MTU.
 
 **Do not:** pump `TryPop` inside RTSComms for Unreal; put lobby widgets here; change RTSServer unless the user asks both types.
 
@@ -64,8 +64,8 @@ Go matchmaking **host**. Discoverable process for login/rooms. Same binary later
 
 **Do:**
 
-- HTTP only for now (no UDP lockstep yet). In-memory sessions and rooms are fine; they vanish on process exit.
-- Keep the existing routes and auth: `POST /Login` (no token); all other calls require `X-Session-Token`. Join/leave use the session’s `player_id` (do not take `player_id` in the body).
+- HTTP for login/rooms; UDP Hello seats a player and maps their address; UDP Order is rebroadcast to the room (including sender). In-memory sessions and rooms are fine; they vanish on process exit.
+- Keep the existing HTTP routes and auth: `POST /Login` (no token); all other HTTP calls require `X-Session-Token`. HTTP Join only authorizes; seating is UDP Hello. Leave uses the session’s `player_id` (do not take `player_id` in the body).
 - Preserve status codes: `401` bad/missing token, `404` missing room / not in room, `409` duplicate create.
 - `username` and room `id`: 1–64 letters, digits, `_`, or `-`.
 - Vendor-agnostic: this process is the hosting environment. Do not add Steam/EOS/Unreal dedicated-server targets.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,7 @@ enum class CommsEventKind {
 	CreateRoom,
 	JoinRoom,
 	LeaveRoom,
+	Order,
 };
 
 struct CommsSession {
@@ -24,6 +26,15 @@ struct CommsRoom {
 	std::vector<std::string> player_ids;
 };
 
+struct CommsOrder {
+	int32_t sim_player_id = 0;
+	std::vector<int32_t> unit_ids;
+	int32_t target_x = 0;
+	int32_t target_y = 0;
+	uint8_t type = 0;
+	bool is_next = false;
+};
+
 struct CommsResult {
 	bool ok = false;
 	int http_status = 0;
@@ -31,6 +42,7 @@ struct CommsResult {
 	CommsSession session;
 	CommsRoom room;
 	std::vector<CommsRoom> rooms;
+	CommsOrder order;
 };
 
 struct CommsEvent {

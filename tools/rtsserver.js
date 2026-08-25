@@ -11,6 +11,7 @@ const SERVER_DIR = path.join(ROOT, 'RTSServer');
 const BIN_DIR = path.join(SERVER_DIR, 'bin');
 const BIN = path.join(BIN_DIR, process.platform === 'win32' ? 'rtsserver.exe' : 'rtsserver');
 const LOCAL_PORT = 8080;
+const LOCAL_UDP_PORT = 8081;
 
 function fail(message, code = 1) {
   console.error(`\nERROR: ${message}`);
@@ -210,7 +211,7 @@ function printLanReachable(lanAddrs) {
   }
 
   const primary = lanAddrs[0];
-  console.log(`==> RTSServer LAN host (bind 0.0.0.0:${LOCAL_PORT})`);
+  console.log(`==> RTSServer LAN host (bind 0.0.0.0:${LOCAL_PORT} / udp ${LOCAL_UDP_PORT})`);
   console.log(`    this machine : http://127.0.0.1:${LOCAL_PORT}`);
   console.log(`    LAN          : http://${primary.address}:${LOCAL_PORT}  (${primary.name})`);
   if (lanAddrs.length > 1) {
@@ -221,7 +222,8 @@ function printLanReachable(lanAddrs) {
   console.log('');
   console.log('    Other computers on this network — Networking.json:');
   console.log(`        "ip": "${primary.address}",`);
-  console.log(`        "port": ${LOCAL_PORT}`);
+  console.log(`        "port": ${LOCAL_PORT},`);
+  console.log(`        "udp_port": ${LOCAL_UDP_PORT}`);
   console.log('');
 }
 
@@ -262,13 +264,13 @@ if (mode === 'build') {
 if (mode === 'nat') {
   const lanAddrs = lanIPv4s();
   printLanReachable(lanAddrs);
-  runGo(go.bin, ['run', '.', '-bind', '0.0.0.0', '-port', String(LOCAL_PORT)]);
+  runGo(go.bin, ['run', '.', '-bind', '0.0.0.0', '-port', String(LOCAL_PORT), '-udp-port', String(LOCAL_UDP_PORT)]);
   process.exit(0);
 }
 
 if (mode === 'local') {
-  console.log(`==> RTSServer local host (127.0.0.1:${LOCAL_PORT})`);
-  runGo(go.bin, ['run', '.', '-bind', '127.0.0.1', '-port', String(LOCAL_PORT)]);
+  console.log(`==> RTSServer local host (127.0.0.1:${LOCAL_PORT} / udp ${LOCAL_UDP_PORT})`);
+  runGo(go.bin, ['run', '.', '-bind', '127.0.0.1', '-port', String(LOCAL_PORT), '-udp-port', String(LOCAL_UDP_PORT)]);
   process.exit(0);
 }
 

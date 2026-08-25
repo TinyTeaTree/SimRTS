@@ -1,5 +1,6 @@
 {
 	"ip": "127.0.0.1",
 	"port": 8080,
-	"mock_tick_lag": 10
+	"udp_port": 8081,
+	"mock_tick_lag": 0
 }

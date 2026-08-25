@@ -38,6 +38,19 @@ FNetworkingLoadResult NetworkingLoader::ParseJsonString(const FString& JsonText)
 		return Result;
 	}
 
+	double UdpPortNumber = 0.0;
+	if (!Root->TryGetNumberField(TEXT("udp_port"), UdpPortNumber))
+	{
+		Result.Error = TEXT("networking: missing udp_port");
+		return Result;
+	}
+	const int32 UdpPort = static_cast<int32>(UdpPortNumber);
+	if (UdpPort < 1 || UdpPort > 65535)
+	{
+		Result.Error = TEXT("networking: udp_port must be 1-65535");
+		return Result;
+	}
+
 	double LagNumber = 0.0;
 	if (!Root->TryGetNumberField(TEXT("mock_tick_lag"), LagNumber))
 	{
@@ -53,6 +66,7 @@ FNetworkingLoadResult NetworkingLoader::ParseJsonString(const FString& JsonText)
 
 	Result.Config.Ip = Ip;
 	Result.Config.Port = Port;
+	Result.Config.UdpPort = UdpPort;
 	Result.Config.MockTickLag = MockTickLag;
 	Result.bSuccess = true;
 	return Result;

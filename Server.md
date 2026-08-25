@@ -1,8 +1,8 @@
 # RTSServer
 
-Go matchmaking host for SimRTS. HTTP only for now (no UDP). Rooms and sessions are in memory and vanish when the process exits.
+Go matchmaking host for SimRTS. HTTP for login/rooms, UDP for order relay. Rooms and sessions are in memory and vanish when the process exits.
 
-Default local address: `http://127.0.0.1:8080`
+Default local address: `http://127.0.0.1:8080` and UDP `127.0.0.1:8081`
 
 ## Install
 
@@ -30,7 +30,7 @@ npm run server_shutdown     # free port 8080 (SIGTERM, then SIGKILL)
 
 `server_local_host` and `server_nat_host` occupy the terminal. Use a second terminal for curl.
 
-`server_nat_host` binds every interface and prints the LAN IPv4 to put in the other machine's `Networking.json` (`ip` / `port`). Same Wi-Fi or ethernet segment; not the public internet.
+`server_nat_host` binds every interface and prints the LAN IPv4 to put in the other machine's `Networking.json` (`ip` / `port` / `udp_port`). Same Wi-Fi or ethernet segment; not the public internet.
 
 If you see `bind: address already in use`:
 
@@ -47,7 +47,7 @@ Anonymous **login** issues a session. Every other call must send that token:
 X-Session-Token: <session_token>
 ```
 
-`username` / room `id` are 1–64 letters, digits, `_`, or `-`. Join/leave use the session’s `player_id` (do not send `player_id` in the body).
+`username` / room `id` are 1–64 letters, digits, `_`, or `-`. HTTP `JoinRoom` only checks that the room exists. The player is seated when the client’s first **UDP Hello** is acked (token + room + player id). Leave uses the session’s `player_id` (do not send `player_id` in the body).
 
 | Method | Path | Auth | Body |
 |---|---|---|---|
@@ -57,7 +57,19 @@ X-Session-Token: <session_token>
 | POST | `/JoinRoom` | token | `{"id":"alpha"}` |
 | POST | `/LeaveRoom` | token | `{"id":"alpha"}` |
 
-Login returns `{ "session_token", "player_id", "nickname" }` (`nickname` = username). Each login is a new anonymous player. Join is idempotent. Duplicate create → `409`. Missing room or player not in room → `404`. Missing/bad token → `401`.
+Login returns `{ "session_token", "player_id", "nickname" }` (`nickname` = username). Each login is a new anonymous player. HTTP Join does not add the player to `player_ids`. Duplicate create → `409`. Missing room or player not in room → `404`. Missing/bad token → `401`.
+
+## UDP relay (`:8081`)
+
+One server socket. Clients bind an ephemeral port and `sendto` the host.
+
+| Kind | When |
+|---|---|
+| Hello | After HTTP Join. Body: room id, player id, session token. Server seats the player, maps the datagram address, Acks. |
+| Ack | Reply to Hello. Client treats Join as complete only after this. |
+| Order | Move command. Server rebroadcasts the same datagram to every seated member, including the sender. |
+
+Packets are binary, one datagram, max ~1200 bytes. Magic `RTS1`.
 
 ## Curl tests
 
@@ -92,7 +104,8 @@ curl -sS -X POST http://127.0.0.1:8080/JoinRoom \
   -H 'Content-Type: application/json' \
   -H "X-Session-Token: $TOKEN" \
   -d '{"id":"alpha"}'
-# {"id":"alpha","player_ids":["p_..."]}
+# {"id":"alpha","player_ids":[]}
+# HTTP Join authorizes only; player_ids fill after UDP Hello
 ```
 
 Second player (another login):

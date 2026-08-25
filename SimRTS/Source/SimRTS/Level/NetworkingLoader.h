@@ -6,6 +6,7 @@ struct FNetworkingConfig
 {
 	FString Ip;
 	int32 Port = 0;
+	int32 UdpPort = 0;
 	int32 MockTickLag = 0;
 };
 
@@ -17,7 +18,7 @@ struct FNetworkingLoadResult
 };
 
 /**
- * Parse Networking.json (Unreal Json module). Required fields: ip, port, mock_tick_lag.
+ * Parse Networking.json (Unreal Json module). Required fields: ip, port, udp_port, mock_tick_lag.
  */
 namespace NetworkingLoader
 {

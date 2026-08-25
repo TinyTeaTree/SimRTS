@@ -72,8 +72,8 @@ func newMux(sessions *SessionStore, rooms *RoomStore) http.Handler {
 		}
 		writeJSON(w, http.StatusCreated, room)
 	}))
-	mux.HandleFunc("POST /JoinRoom", requireSession(sessions, func(w http.ResponseWriter, r *http.Request, session Session) {
-		handleRoomPlayer(w, r, session.PlayerID, rooms.Join)
+	mux.HandleFunc("POST /JoinRoom", requireSession(sessions, func(w http.ResponseWriter, r *http.Request, _ Session) {
+		handleRoomGet(w, r, rooms)
 	}))
 	mux.HandleFunc("POST /LeaveRoom", requireSession(sessions, func(w http.ResponseWriter, r *http.Request, session Session) {
 		handleRoomPlayer(w, r, session.PlayerID, rooms.Leave)
@@ -95,6 +95,25 @@ func requireSession(sessions *SessionStore, next func(http.ResponseWriter, *http
 		}
 		next(w, r, session)
 	}
+}
+
+func handleRoomGet(w http.ResponseWriter, r *http.Request, rooms *RoomStore) {
+	var body roomIDBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	roomID, err := normalizeID(body.ID, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	room, err := rooms.Get(roomID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, room)
 }
 
 func handleRoomPlayer(w http.ResponseWriter, r *http.Request, playerID string, fn func(roomID, playerID string) (Room, error)) {

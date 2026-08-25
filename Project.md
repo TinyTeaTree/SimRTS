@@ -39,10 +39,11 @@ Matchmaking host and local lockstep delay live in:
 
 `SimRTS/Content/Data/Networking.json`
 
-- `ip` / `port` — RTSServer address (SimRTS loads this at BeginPlay into `CommsClient`; no code-hardcoded host)
-- `mock_tick_lag` — sim ticks to wait after a move click before `SubmitOrder` (0 = immediate)
+- `ip` / `port` — RTSServer HTTP address
+- `udp_port` — RTSServer UDP relay (Hello / order bounce)
+- `mock_tick_lag` — sim ticks to wait after a click before sending the order to the relay (0 = send immediately). Apply happens only when the datagram bounces back.
 
-A missing or invalid file logs an error and does not start comms.
+Play always goes through a relay room (localhost server + your own room is fine). A missing or invalid file logs an error and does not start comms.
 
 ## Simulation model
 
