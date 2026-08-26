@@ -81,3 +81,47 @@ func TestLoginRejectsBadUsername(t *testing.T) {
 		t.Fatalf("got %d", rec.Code)
 	}
 }
+
+func TestStartRoomRequiresSeat(t *testing.T) {
+	sessions := NewSessionStore()
+	rooms := NewRoomStore()
+	handler := newMux(sessions, rooms)
+
+	loginBody, _ := json.Marshal(map[string]string{"username": "alice"})
+	loginRec := httptest.NewRecorder()
+	loginReq := httptest.NewRequest(http.MethodPost, "/Login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(loginRec, loginReq)
+	var session Session
+	if err := json.Unmarshal(loginRec.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+
+	createBody, _ := json.Marshal(map[string]string{"id": "alpha"})
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/CreateRoom", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set(sessionTokenHeader, session.Token)
+	handler.ServeHTTP(createRec, createReq)
+
+	startRec := httptest.NewRecorder()
+	startReq := httptest.NewRequest(http.MethodPost, "/StartRoom", bytes.NewReader(createBody))
+	startReq.Header.Set("Content-Type", "application/json")
+	startReq.Header.Set(sessionTokenHeader, session.Token)
+	handler.ServeHTTP(startRec, startReq)
+	if startRec.Code != http.StatusNotFound {
+		t.Fatalf("StartRoom unseated: %d %s", startRec.Code, startRec.Body.String())
+	}
+
+	if _, err := rooms.Seat("alpha", session.PlayerID, nil); err != nil {
+		t.Fatal(err)
+	}
+	startRec2 := httptest.NewRecorder()
+	startReq2 := httptest.NewRequest(http.MethodPost, "/StartRoom", bytes.NewReader(createBody))
+	startReq2.Header.Set("Content-Type", "application/json")
+	startReq2.Header.Set(sessionTokenHeader, session.Token)
+	handler.ServeHTTP(startRec2, startReq2)
+	if startRec2.Code != http.StatusOK {
+		t.Fatalf("StartRoom seated: %d %s", startRec2.Code, startRec2.Body.String())
+	}
+}

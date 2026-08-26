@@ -8,7 +8,9 @@ enum class ESimRTSCommsKind : uint8
 	GetRooms,
 	CreateRoom,
 	JoinRoom,
-	LeaveRoom
+	LeaveRoom,
+	StartRoom,
+	Kickoff
 };
 
 struct FSimRTSCommsRoomView

@@ -58,6 +58,7 @@ public:
 	void RequestCreateRoom(const FString& RoomId);
 	void RequestJoinRoom(const FString& RoomId);
 	void RequestLeaveRoom();
+	void RequestStartRoom();
 
 	void SetMatchmakingMenuOpen(bool bOpen);
 
@@ -69,6 +70,7 @@ public:
 	FString GetMatchmakingNickname() const;
 	FString GetMatchmakingPlayerId() const;
 	FString GetJoinedMatchmakingRoomId() const { return JoinedMatchmakingRoomId; }
+	int32 GetMinRttMs() const;
 
 	FOnSimRTSCommsEvent OnCommsEvent;
 
@@ -105,7 +107,12 @@ private:
 	void DestroyDebugVisualizers();
 	void PumpComms();
 	void MaybePollRooms(float DeltaSeconds);
+	void HandleKickoff(uint32 KickoffId, int32 RemainingMs);
+	void ArmSimClock();
 	FSimRTSCommsEventView MakeCommsView(const SimRTS::CommsEvent& Event) const;
+
+	UFUNCTION()
+	void OnKickoffWaitElapsed();
 
 	UPROPERTY()
 	TObjectPtr<USimRTSRoom> Room;
@@ -116,5 +123,10 @@ private:
 	FString JoinedMatchmakingRoomId;
 	bool bMatchmakingMenuOpen = false;
 	bool bUserRequestPending = false;
+	bool bKickoffArmed = false;
+	int32 PendingKickoffRemainingMs = -1;
+	uint32 PendingKickoffId = 0;
+	uint32 ArmedKickoffId = 0;
 	float RoomListPollAccum = 0.f;
+	FTimerHandle KickoffWaitHandle;
 };

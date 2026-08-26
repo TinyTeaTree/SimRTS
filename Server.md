@@ -56,8 +56,9 @@ X-Session-Token: <session_token>
 | POST | `/CreateRoom` | token | `{"id":"alpha"}` |
 | POST | `/JoinRoom` | token | `{"id":"alpha"}` |
 | POST | `/LeaveRoom` | token | `{"id":"alpha"}` |
+| POST | `/StartRoom` | token | `{"id":"alpha"}` |
 
-Login returns `{ "session_token", "player_id", "nickname" }` (`nickname` = username). Each login is a new anonymous player. HTTP Join does not add the player to `player_ids`. Duplicate create → `409`. Missing room or player not in room → `404`. Missing/bad token → `401`.
+Login returns `{ "session_token", "player_id", "nickname" }` (`nickname` = username). Each login is a new anonymous player. HTTP Join does not add the player to `player_ids`. `StartRoom` marks the session player ready; 404 if they are not seated (UDP Hello). Duplicate Start is 200. When every seated player has started, the server broadcasts UDP Kickoff. Duplicate create → `409`. Missing room or player not in room → `404`. Missing/bad token → `401`.
 
 ## UDP relay (`:8081`)
 
@@ -68,8 +69,12 @@ One server socket. Clients bind an ephemeral port and `sendto` the host.
 | Hello | After HTTP Join. Body: room id, player id, session token. Server seats the player, maps the datagram address, Acks. |
 | Ack | Reply to Hello. Client treats Join as complete only after this. |
 | Order | Move command. Server rebroadcasts the same datagram to every seated member, including the sender. |
+| Ping | After Join. Body: seq. Server echoes Pong to the sender only (not the room). |
+| Pong | Reply to Ping. Same seq. Client measures RTT on the I/O thread. |
+| Kickoff | After all seated players HTTP Start. Body: kickoff id, remaining_ms from first send. Repeated until KickoffAck from everyone or remaining hits 0. |
+| KickoffAck | Client reply to Kickoff. Server does not relay it. |
 
-Packets are binary, one datagram, max ~1200 bytes. Magic `RTS1`.
+Packets are binary, one datagram, max ~1200 bytes. Magic `RTS1`. Clients wait `max(0, remaining_ms - RTT/2)` then start the local sim timer. Repeats of the same kickoff id do not restart that wait.
 
 ## Curl tests
 
@@ -106,6 +111,12 @@ curl -sS -X POST http://127.0.0.1:8080/JoinRoom \
   -d '{"id":"alpha"}'
 # {"id":"alpha","player_ids":[]}
 # HTTP Join authorizes only; player_ids fill after UDP Hello
+
+# after UDP Hello seats the player:
+curl -sS -X POST http://127.0.0.1:8080/StartRoom \
+  -H 'Content-Type: application/json' \
+  -H "X-Session-Token: $TOKEN" \
+  -d '{"id":"alpha"}'
 ```
 
 Second player (another login):

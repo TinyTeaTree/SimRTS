@@ -40,10 +40,12 @@ Matchmaking host and local lockstep delay live in:
 `SimRTS/Content/Data/Networking.json`
 
 - `ip` / `port` — RTSServer HTTP address
-- `udp_port` — RTSServer UDP relay (Hello / order bounce)
+- `udp_port` — RTSServer UDP relay (Hello / order bounce / ping / kickoff)
 - `mock_tick_lag` — sim ticks to wait after a click before sending the order to the relay (0 = send immediately). Apply happens only when the datagram bounces back.
+- `ping_interval_ms` — how often the client sends a UDP ping to the host after Join
+- `ping_keep_amount` — HUD RTT is the minimum of this many recent samples
 
-Play always goes through a relay room (localhost server + your own room is fine). A missing or invalid file logs an error and does not start comms.
+Play always goes through a relay room (localhost server + your own room is fine). After Join, Start means **ready**. When every seated player has started, the server sends a UDP Kickoff; each client waits `remaining_ms - RTT/2` then arms the sim timer. A missing or invalid Networking.json logs an error and does not start comms.
 
 ## Simulation model
 

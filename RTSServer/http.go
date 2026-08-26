@@ -78,6 +78,9 @@ func newMux(sessions *SessionStore, rooms *RoomStore) http.Handler {
 	mux.HandleFunc("POST /LeaveRoom", requireSession(sessions, func(w http.ResponseWriter, r *http.Request, session Session) {
 		handleRoomPlayer(w, r, session.PlayerID, rooms.Leave)
 	}))
+	mux.HandleFunc("POST /StartRoom", requireSession(sessions, func(w http.ResponseWriter, r *http.Request, session Session) {
+		handleRoomPlayer(w, r, session.PlayerID, rooms.MarkStart)
+	}))
 	return withLogs(mux)
 }
 

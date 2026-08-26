@@ -10,6 +10,7 @@
 #include "UnitViewManager.h"
 #include "Engine/World.h"
 #include "GameFramework/DefaultPawn.h"
+#include "TimerManager.h"
 
 namespace {
 
@@ -100,12 +101,15 @@ void ASimRTSGameMode::BeginPlay()
 	{
 		MockTickLag = Networking.Config.MockTickLag;
 		Comms.SetHost(FStringToComms(Networking.Config.Ip), Networking.Config.Port, Networking.Config.UdpPort);
+		Comms.SetPingConfig(Networking.Config.PingIntervalMs, Networking.Config.PingKeepAmount);
 		Comms.Start();
-		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d udp=%d mock_tick_lag=%d"),
+		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d udp=%d mock_tick_lag=%d ping=%dms keep=%d"),
 			*Networking.Config.Ip,
 			Networking.Config.Port,
 			Networking.Config.UdpPort,
-			MockTickLag);
+			MockTickLag,
+			Networking.Config.PingIntervalMs,
+			Networking.Config.PingKeepAmount);
 	}
 
 	if (UUnitViewManager* ViewManager = GetUnitViewManager())
@@ -126,6 +130,10 @@ void ASimRTSGameMode::BeginPlay()
 void ASimRTSGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bMatchmakingMenuOpen = false;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(KickoffWaitHandle);
+	}
 	Comms.Stop();
 
 	if (Room != nullptr)
@@ -171,6 +179,13 @@ bool ASimRTSGameMode::StartDefaultRoom()
 
 	SetMatchmakingMenuOpen(false);
 	SpawnDebugVisualizers();
+	if (PendingKickoffRemainingMs >= 0)
+	{
+		const uint32 Id = PendingKickoffId;
+		const int32 Remaining = PendingKickoffRemainingMs;
+		PendingKickoffRemainingMs = -1;
+		HandleKickoff(Id, Remaining);
+	}
 	return true;
 }
 
@@ -206,6 +221,17 @@ void ASimRTSGameMode::RequestLeaveRoom()
 
 	bUserRequestPending = true;
 	Comms.LeaveRoom(FStringToComms(JoinedMatchmakingRoomId));
+}
+
+void ASimRTSGameMode::RequestStartRoom()
+{
+	if (JoinedMatchmakingRoomId.IsEmpty())
+	{
+		return;
+	}
+
+	bUserRequestPending = true;
+	Comms.StartRoom(FStringToComms(JoinedMatchmakingRoomId));
 }
 
 void ASimRTSGameMode::SetMatchmakingMenuOpen(bool bOpen)
@@ -272,11 +298,84 @@ FString ASimRTSGameMode::GetMatchmakingPlayerId() const
 	return CommsToFString(Comms.PlayerId());
 }
 
+int32 ASimRTSGameMode::GetMinRttMs() const
+{
+	return Comms.MinRttMs();
+}
+
+void ASimRTSGameMode::HandleKickoff(uint32 KickoffId, int32 RemainingMs)
+{
+	if (bKickoffArmed)
+	{
+		return;
+	}
+
+	if (!IsRoomLoaded())
+	{
+		PendingKickoffId = KickoffId;
+		PendingKickoffRemainingMs = RemainingMs;
+		return;
+	}
+
+	bKickoffArmed = true;
+	ArmedKickoffId = KickoffId;
+	int32 WaitMs = RemainingMs;
+	const int32 RttMs = Comms.MinRttMs();
+	if (RttMs >= 0)
+	{
+		WaitMs = FMath::Max(0, RemainingMs - RttMs / 2);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("SimRTS kickoff id=%u remaining=%dms rtt=%dms wait=%dms"),
+		KickoffId,
+		RemainingMs,
+		RttMs,
+		WaitMs);
+
+	if (WaitMs <= 0)
+	{
+		ArmSimClock();
+		return;
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			KickoffWaitHandle,
+			this,
+			&ASimRTSGameMode::OnKickoffWaitElapsed,
+			static_cast<float>(WaitMs) / 1000.f,
+			false);
+	}
+}
+
+void ASimRTSGameMode::OnKickoffWaitElapsed()
+{
+	ArmSimClock();
+}
+
+void ASimRTSGameMode::ArmSimClock()
+{
+	if (Room != nullptr)
+	{
+		Room->StartClock(*this);
+	}
+}
+
 void ASimRTSGameMode::PumpComms()
 {
 	SimRTS::CommsEvent Event;
 	while (Comms.TryPop(Event))
 	{
+		if (Event.kind == SimRTS::CommsEventKind::Kickoff)
+		{
+			if (Event.result.ok)
+			{
+				HandleKickoff(Event.result.kickoff.kickoff_id, Event.result.kickoff.remaining_ms);
+			}
+			continue;
+		}
+
 		if (Event.kind == SimRTS::CommsEventKind::Order)
 		{
 			if (Event.result.ok && IsRoomLoaded())
@@ -319,6 +418,14 @@ void ASimRTSGameMode::PumpComms()
 		{
 			JoinedMatchmakingRoomId.Empty();
 			DelayedMoveOrders.Reset();
+			bKickoffArmed = false;
+			PendingKickoffRemainingMs = -1;
+			PendingKickoffId = 0;
+			ArmedKickoffId = 0;
+			if (UWorld* World = GetWorld())
+			{
+				World->GetTimerManager().ClearTimer(KickoffWaitHandle);
+			}
 		}
 
 		if (Event.kind != SimRTS::CommsEventKind::GetRooms)
@@ -367,8 +474,14 @@ FSimRTSCommsEventView ASimRTSGameMode::MakeCommsView(const SimRTS::CommsEvent& E
 	case SimRTS::CommsEventKind::LeaveRoom:
 		View.Kind = ESimRTSCommsKind::LeaveRoom;
 		break;
+	case SimRTS::CommsEventKind::StartRoom:
+		View.Kind = ESimRTSCommsKind::StartRoom;
+		break;
 	case SimRTS::CommsEventKind::Order:
 		View.Kind = ESimRTSCommsKind::JoinRoom;
+		break;
+	case SimRTS::CommsEventKind::Kickoff:
+		View.Kind = ESimRTSCommsKind::Kickoff;
 		break;
 	}
 

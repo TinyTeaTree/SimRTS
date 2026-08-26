@@ -55,5 +55,15 @@ void ASimRTSDebugHUD::DrawHUD()
 	Y += LineHeight;
 	DrawText(FString::Printf(TEXT("Units: %d"), Units), FLinearColor::White, X, Y, Font, Scale);
 	Y += LineHeight;
+	const int32 RttMs = GameMode->GetMinRttMs();
+	if (RttMs < 0)
+	{
+		DrawText(TEXT("RTT: --"), FLinearColor::White, X, Y, Font, Scale);
+	}
+	else
+	{
+		DrawText(FString::Printf(TEXT("RTT: %d ms"), RttMs), FLinearColor::White, X, Y, Font, Scale);
+	}
+	Y += LineHeight;
 	DrawText(SelectionText, FLinearColor::White, X, Y, Font, Scale);
 }

@@ -20,12 +20,16 @@ class SIMRTS_API USimRTSRoom : public UObject
 public:
 	USimRTSRoom();
 
-	/** Load default level / rules / spawns, spawn unit actors, start the sim clock. */
+	/** Load default level / rules / spawns, spawn unit actors. Does not start the sim clock. */
 	bool LoadDefault(ASimRTSGameMode& GameMode);
+
+	/** Arm the Unreal sim timer. No-op if not loaded or already running. */
+	void StartClock(ASimRTSGameMode& GameMode);
 
 	void Stop(ASimRTSGameMode& GameMode);
 
 	bool IsLoaded() const { return bLoaded; }
+	bool IsClockStarted() const { return bClockStarted; }
 
 	FSimBridge& GetBridge() { return Bridge; }
 	const FSimBridge& GetBridge() const { return Bridge; }
@@ -42,4 +46,5 @@ private:
 
 	FTimerHandle SimTimerHandle;
 	bool bLoaded = false;
+	bool bClockStarted = false;
 };

@@ -64,10 +64,38 @@ FNetworkingLoadResult NetworkingLoader::ParseJsonString(const FString& JsonText)
 		return Result;
 	}
 
+	double PingIntervalNumber = 0.0;
+	if (!Root->TryGetNumberField(TEXT("ping_interval_ms"), PingIntervalNumber))
+	{
+		Result.Error = TEXT("networking: missing ping_interval_ms");
+		return Result;
+	}
+	const int32 PingIntervalMs = static_cast<int32>(PingIntervalNumber);
+	if (PingIntervalMs < 1)
+	{
+		Result.Error = TEXT("networking: ping_interval_ms must be >= 1");
+		return Result;
+	}
+
+	double PingKeepNumber = 0.0;
+	if (!Root->TryGetNumberField(TEXT("ping_keep_amount"), PingKeepNumber))
+	{
+		Result.Error = TEXT("networking: missing ping_keep_amount");
+		return Result;
+	}
+	const int32 PingKeepAmount = static_cast<int32>(PingKeepNumber);
+	if (PingKeepAmount < 1)
+	{
+		Result.Error = TEXT("networking: ping_keep_amount must be >= 1");
+		return Result;
+	}
+
 	Result.Config.Ip = Ip;
 	Result.Config.Port = Port;
 	Result.Config.UdpPort = UdpPort;
 	Result.Config.MockTickLag = MockTickLag;
+	Result.Config.PingIntervalMs = PingIntervalMs;
+	Result.Config.PingKeepAmount = PingKeepAmount;
 	Result.bSuccess = true;
 	return Result;
 }

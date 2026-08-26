@@ -12,7 +12,9 @@ enum class CommsEventKind {
 	CreateRoom,
 	JoinRoom,
 	LeaveRoom,
+	StartRoom,
 	Order,
+	Kickoff,
 };
 
 struct CommsSession {
@@ -35,6 +37,11 @@ struct CommsOrder {
 	bool is_next = false;
 };
 
+struct CommsKickoff {
+	uint32_t kickoff_id = 0;
+	int32_t remaining_ms = 0;
+};
+
 struct CommsResult {
 	bool ok = false;
 	int http_status = 0;
@@ -43,6 +50,7 @@ struct CommsResult {
 	CommsRoom room;
 	std::vector<CommsRoom> rooms;
 	CommsOrder order;
+	CommsKickoff kickoff;
 };
 
 struct CommsEvent {

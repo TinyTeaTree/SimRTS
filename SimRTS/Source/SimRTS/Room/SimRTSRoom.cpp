@@ -28,6 +28,23 @@ bool USimRTSRoom::LoadDefault(ASimRTSGameMode& GameMode)
 		UnitViewManager->SyncActors(&GameMode);
 	}
 
+	bLoaded = true;
+
+	UE_LOG(LogTemp, Log, TEXT("SimRTS Room loaded. Units=%d GridScale=%.1f EngineTicksPerSecond=%d (waiting for kickoff)"),
+		static_cast<int32>(Bridge.GetState().units.size()),
+		GameMode.GetGridScale(),
+		Bridge.GetStaticData().ticks_per_second);
+
+	return true;
+}
+
+void USimRTSRoom::StartClock(ASimRTSGameMode& GameMode)
+{
+	if (!bLoaded || bClockStarted)
+	{
+		return;
+	}
+
 	const int32 TicksPerSecond = FMath::Max(1, Bridge.GetStaticData().ticks_per_second);
 	const float SimTickInterval = 1.f / static_cast<float>(TicksPerSecond);
 
@@ -41,15 +58,8 @@ bool USimRTSRoom::LoadDefault(ASimRTSGameMode& GameMode)
 			true);
 	}
 
-	bLoaded = true;
-
-	UE_LOG(LogTemp, Log, TEXT("SimRTS Room loaded. Units=%d GridScale=%.1f EngineTicksPerSecond=%d (interval=%.3fs)"),
-		static_cast<int32>(Bridge.GetState().units.size()),
-		GameMode.GetGridScale(),
-		TicksPerSecond,
-		SimTickInterval);
-
-	return true;
+	bClockStarted = true;
+	UE_LOG(LogTemp, Log, TEXT("SimRTS sim clock started (interval=%.3fs)"), SimTickInterval);
 }
 
 void USimRTSRoom::Stop(ASimRTSGameMode& GameMode)
@@ -60,6 +70,7 @@ void USimRTSRoom::Stop(ASimRTSGameMode& GameMode)
 	}
 
 	bLoaded = false;
+	bClockStarted = false;
 }
 
 void USimRTSRoom::OnSimTick()

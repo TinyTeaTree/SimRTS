@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestRoomLifecycle(t *testing.T) {
 	store := NewRoomStore()
@@ -43,5 +46,57 @@ func TestRoomLifecycle(t *testing.T) {
 	rooms := store.List()
 	if len(rooms) != 1 || rooms[0].ID != "alpha" {
 		t.Fatalf("list = %#v", rooms)
+	}
+}
+
+func TestMarkStartRequiresSeatAndKickoff(t *testing.T) {
+	store := NewRoomStore()
+	if _, err := store.Create("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkStart("alpha", "p1"); err == nil {
+		t.Fatal("start without seat should fail")
+	}
+	if _, err := store.Seat("alpha", "p1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkStart("alpha", "p1"); err != nil {
+		t.Fatalf("start seated: %v", err)
+	}
+	jobs := store.KickoffBroadcasts(time.Now())
+	if len(jobs) != 1 || jobs[0].KickoffID != 1 || jobs[0].RemainingMs == 0 {
+		t.Fatalf("kickoff jobs %#v", jobs)
+	}
+	again, err := store.MarkStart("alpha", "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.PlayerIDs) != 1 {
+		t.Fatalf("idempotent start %#v", again)
+	}
+}
+
+func TestMarkStartWaitsForAllSeated(t *testing.T) {
+	store := NewRoomStore()
+	if _, err := store.Create("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Seat("alpha", "p1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Seat("alpha", "p2", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkStart("alpha", "p1"); err != nil {
+		t.Fatal(err)
+	}
+	if jobs := store.KickoffBroadcasts(time.Now()); len(jobs) != 0 {
+		t.Fatalf("kickoff before all ready: %#v", jobs)
+	}
+	if _, err := store.MarkStart("alpha", "p2"); err != nil {
+		t.Fatal(err)
+	}
+	if jobs := store.KickoffBroadcasts(time.Now()); len(jobs) != 1 {
+		t.Fatalf("expected kickoff after both ready, got %#v", jobs)
 	}
 }

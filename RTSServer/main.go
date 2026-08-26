@@ -32,6 +32,7 @@ func main() {
 	log.Printf("POST /CreateRoom  {\"id\":\"room\"}")
 	log.Printf("POST /JoinRoom    {\"id\":\"room\"}  (authorize only; UDP Hello seats)")
 	log.Printf("POST /LeaveRoom   {\"id\":\"room\"}")
+	log.Printf("POST /StartRoom   {\"id\":\"room\"}  (ready; seated players only)")
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)

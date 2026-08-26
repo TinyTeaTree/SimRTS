@@ -5,6 +5,12 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"time"
+)
+
+const (
+	kickoffDuration = 1000 * time.Millisecond
+	kickoffRepeat   = 100 * time.Millisecond
 )
 
 type Room struct {
@@ -12,10 +18,26 @@ type Room struct {
 	PlayerIDs []string `json:"player_ids"`
 }
 
+type kickoffState struct {
+	ID       uint32
+	Deadline time.Time
+	Acked    map[string]bool
+}
+
 type storedRoom struct {
-	ID        string
-	PlayerIDs []string
-	Addrs     map[string]*net.UDPAddr
+	ID            string
+	PlayerIDs     []string
+	Addrs         map[string]*net.UDPAddr
+	Ready         map[string]struct{}
+	Kickoff       *kickoffState
+	nextKickoffID uint32
+}
+
+type KickoffBroadcast struct {
+	RoomID      string
+	KickoffID   uint32
+	RemainingMs uint32
+	Addrs       []*net.UDPAddr
 }
 
 type RoomStore struct {
@@ -46,7 +68,12 @@ func (s *RoomStore) Create(id string) (Room, error) {
 	if _, exists := s.rooms[id]; exists {
 		return Room{}, fmt.Errorf("room already exists")
 	}
-	room := &storedRoom{ID: id, PlayerIDs: []string{}, Addrs: map[string]*net.UDPAddr{}}
+	room := &storedRoom{
+		ID:        id,
+		PlayerIDs: []string{},
+		Addrs:     map[string]*net.UDPAddr{},
+		Ready:     map[string]struct{}{},
+	}
 	s.rooms[id] = room
 	return snapshotRoom(room), nil
 }
@@ -60,6 +87,16 @@ func (s *RoomStore) Get(id string) (Room, error) {
 		return Room{}, fmt.Errorf("room not found")
 	}
 	return snapshotRoom(room), nil
+}
+
+func (s *RoomStore) IsSeated(roomID, playerID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	room, ok := s.rooms[roomID]
+	if !ok {
+		return false
+	}
+	return contains(room.PlayerIDs, playerID)
 }
 
 // Seat adds the player on first UDP Hello and maps their datagram address.
@@ -93,15 +130,72 @@ func (s *RoomStore) RelayAddrs(roomID, senderID string) ([]*net.UDPAddr, error) 
 	if !contains(room.PlayerIDs, senderID) {
 		return nil, fmt.Errorf("player not in room")
 	}
-	out := make([]*net.UDPAddr, 0, len(room.Addrs))
-	for _, addr := range room.Addrs {
-		if addr == nil {
+	return copyAddrs(room), nil
+}
+
+func (s *RoomStore) MarkStart(roomID, playerID string) (Room, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room, ok := s.rooms[roomID]
+	if !ok {
+		return Room{}, fmt.Errorf("room not found")
+	}
+	if !contains(room.PlayerIDs, playerID) {
+		return Room{}, fmt.Errorf("player not in room")
+	}
+	room.Ready[playerID] = struct{}{}
+	if room.Kickoff == nil && allSeatedReady(room) {
+		room.nextKickoffID++
+		room.Kickoff = &kickoffState{
+			ID:       room.nextKickoffID,
+			Deadline: time.Now().Add(kickoffDuration),
+			Acked:    map[string]bool{},
+		}
+	}
+	return snapshotRoom(room), nil
+}
+
+func (s *RoomStore) AckKickoff(roomID, playerID string, id uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room, ok := s.rooms[roomID]
+	if !ok {
+		return fmt.Errorf("room not found")
+	}
+	if !contains(room.PlayerIDs, playerID) {
+		return fmt.Errorf("player not in room")
+	}
+	if room.Kickoff == nil || room.Kickoff.ID != id {
+		return nil
+	}
+	room.Kickoff.Acked[playerID] = true
+	return nil
+}
+
+func (s *RoomStore) KickoffBroadcasts(now time.Time) []KickoffBroadcast {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]KickoffBroadcast, 0)
+	for _, room := range s.rooms {
+		if room.Kickoff == nil {
 			continue
 		}
-		copied := *addr
-		out = append(out, &copied)
+		remaining := room.Kickoff.Deadline.Sub(now)
+		if remaining <= 0 || allKickoffAcked(room) {
+			room.Kickoff = nil
+			continue
+		}
+		out = append(out, KickoffBroadcast{
+			RoomID:      room.ID,
+			KickoffID:   room.Kickoff.ID,
+			RemainingMs: uint32(remaining.Milliseconds()),
+			Addrs:       copyAddrs(room),
+		})
 	}
-	return out, nil
+	return out
 }
 
 func (s *RoomStore) Leave(roomID, playerID string) (Room, error) {
@@ -126,6 +220,13 @@ func (s *RoomStore) Leave(roomID, playerID string) (Room, error) {
 	}
 	room.PlayerIDs = next
 	delete(room.Addrs, playerID)
+	delete(room.Ready, playerID)
+	if room.Kickoff != nil {
+		delete(room.Kickoff.Acked, playerID)
+		if len(room.PlayerIDs) == 0 {
+			room.Kickoff = nil
+		}
+	}
 	return snapshotRoom(room), nil
 }
 
@@ -133,6 +234,42 @@ func snapshotRoom(room *storedRoom) Room {
 	players := make([]string, len(room.PlayerIDs))
 	copy(players, room.PlayerIDs)
 	return Room{ID: room.ID, PlayerIDs: players}
+}
+
+func copyAddrs(room *storedRoom) []*net.UDPAddr {
+	out := make([]*net.UDPAddr, 0, len(room.Addrs))
+	for _, addr := range room.Addrs {
+		if addr == nil {
+			continue
+		}
+		copied := *addr
+		out = append(out, &copied)
+	}
+	return out
+}
+
+func allSeatedReady(room *storedRoom) bool {
+	if len(room.PlayerIDs) == 0 {
+		return false
+	}
+	for _, id := range room.PlayerIDs {
+		if _, ok := room.Ready[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func allKickoffAcked(room *storedRoom) bool {
+	if room.Kickoff == nil || len(room.PlayerIDs) == 0 {
+		return false
+	}
+	for _, id := range room.PlayerIDs {
+		if !room.Kickoff.Acked[id] {
+			return false
+		}
+	}
+	return true
 }
 
 func contains(ids []string, want string) bool {

@@ -1,6 +1,8 @@
 #include "CommsClient.h"
 #include "CommsSockets.h"
+#include "RttSampler.h"
 
+#include <chrono>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -310,6 +312,10 @@ constexpr int kUdpMaxIdLen = 64;
 constexpr uint8_t kUdpHello = 1;
 constexpr uint8_t kUdpAck = 2;
 constexpr uint8_t kUdpOrder = 3;
+constexpr uint8_t kUdpPing = 4;
+constexpr uint8_t kUdpPong = 5;
+constexpr uint8_t kUdpKickoff = 6;
+constexpr uint8_t kUdpKickoffAck = 7;
 
 void PutU8(std::vector<uint8_t>& out, uint8_t value) {
 	out.push_back(value);
@@ -321,6 +327,13 @@ void PutI32(std::vector<uint8_t>& out, int32_t value) {
 	out.push_back(static_cast<uint8_t>(u >> 8));
 	out.push_back(static_cast<uint8_t>(u >> 16));
 	out.push_back(static_cast<uint8_t>(u >> 24));
+}
+
+void PutU32(std::vector<uint8_t>& out, uint32_t value) {
+	out.push_back(static_cast<uint8_t>(value));
+	out.push_back(static_cast<uint8_t>(value >> 8));
+	out.push_back(static_cast<uint8_t>(value >> 16));
+	out.push_back(static_cast<uint8_t>(value >> 24));
 }
 
 void PutU16(std::vector<uint8_t>& out, uint16_t value) {
@@ -378,6 +391,18 @@ bool ReadI32(const uint8_t* data, int size, int& off, int32_t& out) {
 		| (static_cast<uint32_t>(data[off + 2]) << 16)
 		| (static_cast<uint32_t>(data[off + 3]) << 24);
 	out = static_cast<int32_t>(u);
+	off += 4;
+	return true;
+}
+
+bool ReadU32(const uint8_t* data, int size, int& off, uint32_t& out) {
+	if (off + 4 > size) {
+		return false;
+	}
+	out = static_cast<uint32_t>(data[off])
+		| (static_cast<uint32_t>(data[off + 1]) << 8)
+		| (static_cast<uint32_t>(data[off + 2]) << 16)
+		| (static_cast<uint32_t>(data[off + 3]) << 24);
 	off += 4;
 	return true;
 }
@@ -468,6 +493,36 @@ bool EncodeUdpOrder(
 	return out.size() <= kUdpMaxPacket;
 }
 
+bool EncodeUdpPing(
+	const std::string& room_id,
+	const std::string& player_id,
+	uint32_t seq,
+	std::vector<uint8_t>& out) {
+	out.clear();
+	out.insert(out.end(), kUdpMagic, kUdpMagic + 4);
+	PutU8(out, kUdpPing);
+	if (!PutStr(out, room_id) || !PutStr(out, player_id)) {
+		return false;
+	}
+	PutU32(out, seq);
+	return out.size() <= kUdpMaxPacket;
+}
+
+bool EncodeUdpKickoffAck(
+	const std::string& room_id,
+	const std::string& player_id,
+	uint32_t kickoff_id,
+	std::vector<uint8_t>& out) {
+	out.clear();
+	out.insert(out.end(), kUdpMagic, kUdpMagic + 4);
+	PutU8(out, kUdpKickoffAck);
+	if (!PutStr(out, room_id) || !PutStr(out, player_id)) {
+		return false;
+	}
+	PutU32(out, kickoff_id);
+	return out.size() <= kUdpMaxPacket;
+}
+
 } // namespace
 
 struct CommsRequest {
@@ -501,6 +556,7 @@ struct CommsClient::Impl {
 	std::queue<std::vector<uint8_t>> udp_out;
 	std::string hello_room;
 	bool hello_acked = false;
+	RttSampler rtt;
 
 	void Enqueue(CommsRequest request) {
 		{
@@ -544,6 +600,29 @@ struct CommsClient::Impl {
 		}
 		udp_socket = UdpOpenBind(error);
 		return udp_socket != kInvalidUdp;
+	}
+
+	void MaybeSendPing() {
+		const auto now = std::chrono::steady_clock::now();
+		if (!rtt.ShouldSend(now)) {
+			return;
+		}
+		std::string room_id;
+		std::string player_id;
+		{
+			std::lock_guard<std::mutex> lock(session_mu);
+			room_id = joined_room;
+			player_id = session.player_id;
+		}
+		if (room_id.empty() || player_id.empty()) {
+			return;
+		}
+		const uint32_t seq = rtt.BeginPing(now);
+		std::vector<uint8_t> packet;
+		if (!EncodeUdpPing(room_id, player_id, seq, packet)) {
+			return;
+		}
+		QueueUdp(std::move(packet));
 	}
 
 	void DrainUdpOut() {
@@ -591,6 +670,42 @@ struct CommsClient::Impl {
 			udp_cv.notify_all();
 			return;
 		}
+		if (kind == kUdpPong) {
+			uint32_t seq = 0;
+			if (ReadU32(data, size, off, seq)) {
+				rtt.OnPong(seq, std::chrono::steady_clock::now());
+			}
+			return;
+		}
+		if (kind == kUdpKickoff) {
+			uint32_t kickoff_id = 0;
+			uint32_t remaining_ms = 0;
+			if (!ReadU32(data, size, off, kickoff_id) || !ReadU32(data, size, off, remaining_ms)) {
+				return;
+			}
+			std::string ack_room;
+			std::string ack_player;
+			{
+				std::lock_guard<std::mutex> lock(session_mu);
+				ack_room = joined_room;
+				ack_player = session.player_id;
+			}
+			if (ack_room.empty()) {
+				ack_room = room_id;
+			}
+			std::vector<uint8_t> ack;
+			if (!ack_player.empty() && EncodeUdpKickoffAck(ack_room, ack_player, kickoff_id, ack)) {
+				QueueUdp(std::move(ack));
+			}
+			CommsEvent event;
+			event.kind = CommsEventKind::Kickoff;
+			event.result.ok = true;
+			event.result.room.id = std::move(room_id);
+			event.result.kickoff.kickoff_id = kickoff_id;
+			event.result.kickoff.remaining_ms = static_cast<int32_t>(remaining_ms);
+			Push(std::move(event));
+			return;
+		}
 		if (kind != kUdpOrder) {
 			return;
 		}
@@ -614,6 +729,8 @@ struct CommsClient::Impl {
 					return;
 				}
 			}
+			DrainUdpOut();
+			MaybeSendPing();
 			DrainUdpOut();
 			UdpSocket socket = kInvalidUdp;
 			{
@@ -658,8 +775,11 @@ struct CommsClient::Impl {
 			std::unique_lock<std::mutex> lock(udp_mu);
 			if (udp_cv.wait_for(lock, std::chrono::milliseconds(100), [this] { return hello_acked; })) {
 				lock.unlock();
-				std::lock_guard<std::mutex> session_lock(session_mu);
-				joined_room = room_id;
+				{
+					std::lock_guard<std::mutex> session_lock(session_mu);
+					joined_room = room_id;
+				}
+				rtt.Start();
 				return true;
 			}
 		}
@@ -697,6 +817,8 @@ struct CommsClient::Impl {
 				path = "/CreateRoom";
 			} else if (request.kind == CommsEventKind::JoinRoom) {
 				path = "/JoinRoom";
+			} else if (request.kind == CommsEventKind::StartRoom) {
+				path = "/StartRoom";
 			} else {
 				path = "/LeaveRoom";
 			}
@@ -718,8 +840,11 @@ struct CommsClient::Impl {
 			}
 		}
 		if (request.kind == CommsEventKind::LeaveRoom && result.ok) {
-			std::lock_guard<std::mutex> lock(session_mu);
-			joined_room.clear();
+			{
+				std::lock_guard<std::mutex> lock(session_mu);
+				joined_room.clear();
+			}
+			rtt.Stop();
 		}
 		return result;
 	}
@@ -755,6 +880,10 @@ void CommsClient::SetHost(std::string host, int port, int udp_port) {
 	impl_->host = std::move(host);
 	impl_->port = port;
 	impl_->udp_port = udp_port;
+}
+
+void CommsClient::SetPingConfig(int interval_ms, int keep_amount) {
+	impl_->rtt.SetConfig(interval_ms, keep_amount);
 }
 
 void CommsClient::Start() {
@@ -798,6 +927,7 @@ void CommsClient::Stop() {
 	}
 	std::lock_guard<std::mutex> lock(impl_->request_mu);
 	impl_->running = false;
+	impl_->rtt.Stop();
 }
 
 void CommsClient::Login(std::string username) {
@@ -823,6 +953,11 @@ void CommsClient::JoinRoom(std::string room_id) {
 void CommsClient::LeaveRoom(std::string room_id) {
 	Start();
 	impl_->Enqueue({CommsEventKind::LeaveRoom, std::move(room_id)});
+}
+
+void CommsClient::StartRoom(std::string room_id) {
+	Start();
+	impl_->Enqueue({CommsEventKind::StartRoom, std::move(room_id)});
 }
 
 void CommsClient::SendOrder(CommsOrder order) {
@@ -867,6 +1002,10 @@ std::string CommsClient::PlayerId() const {
 std::string CommsClient::Nickname() const {
 	std::lock_guard<std::mutex> lock(impl_->session_mu);
 	return impl_->session.nickname;
+}
+
+int CommsClient::MinRttMs() const {
+	return impl_->rtt.MinRttMs();
 }
 
 } // namespace SimRTS

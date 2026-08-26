@@ -171,16 +171,14 @@ void ASimRTSPlayerController::HandleLeaveRequested()
 void ASimRTSPlayerController::HandleStartClicked()
 {
 	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
-	if (GameMode == nullptr || !GameMode->StartDefaultRoom())
+	if (GameMode == nullptr || MainMenu == nullptr)
 	{
-		if (MainMenu != nullptr)
-		{
-			MainMenu->SetStatus(TEXT("Failed to load level."), true);
-		}
 		return;
 	}
 
-	HideMainMenu();
+	MainMenu->SetBusy(true);
+	MainMenu->SetStatus(TEXT("Ready... waiting for kickoff."), false);
+	GameMode->RequestStartRoom();
 }
 
 void ASimRTSPlayerController::HandleCommsEvent(const FSimRTSCommsEventView& Event)
@@ -243,12 +241,25 @@ void ASimRTSPlayerController::HandleCommsEvent(const FSimRTSCommsEventView& Even
 		MainMenu->ShowRoom(Event.Room.Id, Event.Room.PlayerIds, GameMode->GetMatchmakingPlayerId());
 		break;
 
+	case ESimRTSCommsKind::StartRoom:
+		if (!GameMode->StartDefaultRoom())
+		{
+			MainMenu->SetBusy(false);
+			MainMenu->SetStatus(TEXT("Failed to load level."), true);
+			break;
+		}
+		HideMainMenu();
+		break;
+
 	case ESimRTSCommsKind::LeaveRoom:
 		MenuPage = ESimRTSMenuPage::Lobby;
 		MainMenu->SetBusy(false);
 		MainMenu->SetStatus(TEXT("Left room."), false);
 		MainMenu->ShowLobby(GameMode->GetMatchmakingNickname(), LastRooms);
 		GameMode->RequestGetRooms();
+		break;
+
+	case ESimRTSCommsKind::Kickoff:
 		break;
 	}
 }
