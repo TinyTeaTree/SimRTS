@@ -100,16 +100,18 @@ void ASimRTSGameMode::BeginPlay()
 	else
 	{
 		MockTickLag = Networking.Config.MockTickLag;
+		MinTickDelaySeconds = Networking.Config.PacerMinDelayMs / 1000.f;
 		Comms.SetHost(FStringToComms(Networking.Config.Ip), Networking.Config.Port, Networking.Config.UdpPort);
 		Comms.SetPingConfig(Networking.Config.PingIntervalMs, Networking.Config.PingKeepAmount);
 		Comms.Start();
-		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d udp=%d mock_tick_lag=%d ping=%dms keep=%d"),
+		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d udp=%d mock_tick_lag=%d ping=%dms keep=%d pacer_min_delay=%dms"),
 			*Networking.Config.Ip,
 			Networking.Config.Port,
 			Networking.Config.UdpPort,
 			MockTickLag,
 			Networking.Config.PingIntervalMs,
-			Networking.Config.PingKeepAmount);
+			Networking.Config.PingKeepAmount,
+			Networking.Config.PacerMinDelayMs);
 	}
 
 	if (UUnitViewManager* ViewManager = GetUnitViewManager())

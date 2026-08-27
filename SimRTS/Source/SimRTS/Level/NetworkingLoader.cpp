@@ -90,12 +90,26 @@ FNetworkingLoadResult NetworkingLoader::ParseJsonString(const FString& JsonText)
 		return Result;
 	}
 
+	double PacerMinDelayNumber = 0.0;
+	if (!Root->TryGetNumberField(TEXT("pacer_min_delay_ms"), PacerMinDelayNumber))
+	{
+		Result.Error = TEXT("networking: missing pacer_min_delay_ms");
+		return Result;
+	}
+	const int32 PacerMinDelayMs = static_cast<int32>(PacerMinDelayNumber);
+	if (PacerMinDelayMs < 1)
+	{
+		Result.Error = TEXT("networking: pacer_min_delay_ms must be >= 1");
+		return Result;
+	}
+
 	Result.Config.Ip = Ip;
 	Result.Config.Port = Port;
 	Result.Config.UdpPort = UdpPort;
 	Result.Config.MockTickLag = MockTickLag;
 	Result.Config.PingIntervalMs = PingIntervalMs;
 	Result.Config.PingKeepAmount = PingKeepAmount;
+	Result.Config.PacerMinDelayMs = PacerMinDelayMs;
 	Result.bSuccess = true;
 	return Result;
 }

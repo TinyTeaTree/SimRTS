@@ -10,6 +10,7 @@ struct FNetworkingConfig
 	int32 MockTickLag = 0;
 	int32 PingIntervalMs = 200;
 	int32 PingKeepAmount = 10;
+	int32 PacerMinDelayMs = 10;
 };
 
 struct FNetworkingLoadResult
@@ -20,7 +21,7 @@ struct FNetworkingLoadResult
 };
 
 /**
- * Parse Networking.json (Unreal Json module). Required fields: ip, port, udp_port, mock_tick_lag, ping_interval_ms, ping_keep_amount.
+ * Parse Networking.json (Unreal Json module). Required fields: ip, port, udp_port, mock_tick_lag, ping_interval_ms, ping_keep_amount, pacer_min_delay_ms.
  */
 namespace NetworkingLoader
 {

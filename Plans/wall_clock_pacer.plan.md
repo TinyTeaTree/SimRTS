@@ -62,7 +62,7 @@ Time source: `FPlatformTime::Seconds()`, not dilated world time. First wait afte
 
 [`USimRTSRoom::StartClock`](../SimRTS/Source/SimRTS/Room/SimRTSRoom.cpp): store `T0`, compute first wait, `SetTimer(..., false)`. Each `OnSimTick`: keep current body (flush, `StepForward`, sync), then compute next wait and one-shot again. [`Stop`](../SimRTS/Source/SimRTS/Room/SimRTSRoom.cpp): clear timer and `T0`.
 
-`MinTickDelaySeconds` on [`ASimRTSGameMode`](../SimRTS/Source/SimRTS/Framework/SimRTSGameMode.h) under `SimRTS|Debug`, default `0.01`.
+`pacer_min_delay_ms` in [`Networking.json`](../SimRTS/Content/Data/Networking.json) (required, >= 1). GameMode loads it into seconds for the pacer.
 
 Docs: [`Project.md`](../Project.md) currently says Unreal timer = `1 / ticks_per_second`. Change that to: Kickoff saves `T0`; the pacer waits until `T0 + N/tps` (or min delay when behind). Leave Kickoff wait as it is.
 

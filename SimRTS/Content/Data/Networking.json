@@ -4,5 +4,6 @@
 	"udp_port": 8081,
 	"mock_tick_lag": 0,
 	"ping_interval_ms": 200,
-	"ping_keep_amount": 10
+	"ping_keep_amount": 10,
+	"pacer_min_delay_ms": 10
 }

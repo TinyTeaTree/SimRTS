@@ -100,9 +100,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Debug")
 	bool bEnableTickHaltKeys = true;
 
-	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Debug", meta = (ClampMin = "0.001"))
-	float MinTickDelaySeconds = 0.01f;
-
 	UPROPERTY()
 	TObjectPtr<ASimRTSObstructionGridVisualizer> ObstructionGridVisualizer;
 
@@ -132,6 +129,7 @@ private:
 
 	SimRTS::CommsClient Comms;
 	int32 MockTickLag = 0;
+	float MinTickDelaySeconds = 0.01f;
 	TArray<FDelayedMoveOrder> DelayedMoveOrders;
 	FString JoinedMatchmakingRoomId;
 	bool bMatchmakingMenuOpen = false;
