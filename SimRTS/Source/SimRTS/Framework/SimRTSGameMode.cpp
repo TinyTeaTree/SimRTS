@@ -303,6 +303,24 @@ int32 ASimRTSGameMode::GetMinRttMs() const
 	return Comms.MinRttMs();
 }
 
+void ASimRTSGameMode::SetSimTickHalted(bool bHalted)
+{
+	if (Room != nullptr)
+	{
+		Room->SetTickHalted(bHalted);
+	}
+}
+
+bool ASimRTSGameMode::IsSimTickHalted() const
+{
+	return Room != nullptr && Room->IsTickHalted();
+}
+
+int32 ASimRTSGameMode::GetSimTicksBehind() const
+{
+	return Room != nullptr ? Room->GetTicksBehind() : 0;
+}
+
 void ASimRTSGameMode::HandleKickoff(uint32 KickoffId, int32 RemainingMs)
 {
 	if (bKickoffArmed)

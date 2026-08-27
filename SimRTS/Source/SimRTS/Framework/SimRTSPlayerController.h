@@ -47,6 +47,8 @@ protected:
 	void OnLeftReleased();
 	void OnRightPressed();
 	void OnRightReleased();
+	void OnHaltPressed();
+	void OnResumePressed();
 
 	void ShowMainMenu();
 	void HideMainMenu();

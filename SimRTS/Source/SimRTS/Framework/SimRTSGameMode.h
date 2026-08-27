@@ -72,6 +72,13 @@ public:
 	FString GetJoinedMatchmakingRoomId() const { return JoinedMatchmakingRoomId; }
 	int32 GetMinRttMs() const;
 
+	bool IsSimClockStarted() const { return Room != nullptr && Room->IsClockStarted(); }
+	bool AreTickHaltKeysEnabled() const { return bEnableTickHaltKeys; }
+	float GetMinTickDelaySeconds() const { return MinTickDelaySeconds; }
+	void SetSimTickHalted(bool bHalted);
+	bool IsSimTickHalted() const;
+	int32 GetSimTicksBehind() const;
+
 	FOnSimRTSCommsEvent OnCommsEvent;
 
 protected:
@@ -89,6 +96,12 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Debug")
 	bool bShowUnitPaths = true;
+
+	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Debug")
+	bool bEnableTickHaltKeys = true;
+
+	UPROPERTY(EditDefaultsOnly, Category = "SimRTS|Debug", meta = (ClampMin = "0.001"))
+	float MinTickDelaySeconds = 0.01f;
 
 	UPROPERTY()
 	TObjectPtr<ASimRTSObstructionGridVisualizer> ObstructionGridVisualizer;

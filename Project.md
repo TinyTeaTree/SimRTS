@@ -20,7 +20,7 @@ Level rules and starting state live **outside compiled code** in JSON under:
 
 Document shape:
 
-- `world` — discrete `width` / `height`, and required `ticks_per_second` (from JSON → engine static data; Unreal timer = `1 / ticks_per_second`)
+- `world` — discrete `width` / `height`, and required `ticks_per_second` (from JSON → engine static data). After Kickoff, Unreal saves wall time `T0` and the pacer waits until `T0 + N / ticks_per_second` (or `MinTickDelay` when behind) before the next tick attempt.
 - `obstruction` — single `'0'`/`'1'` string of length `width * height` (no separators). Index `i` → `x = i % width`, `y = i / width`. `'0'` walkable, `'1'` blocked. Loaded once into a static 2D `PathingGrid` of `GridCell`; the string is not retained.
 - `unit_defs` — `Soldier` / `Vehicle`: `speed` (discrete **points per second**), `radius`
 - `spawns` — starting units (`id`, `type`, `x`, `y`, optional `rotation`)
@@ -45,7 +45,7 @@ Matchmaking host and local lockstep delay live in:
 - `ping_interval_ms` — how often the client sends a UDP ping to the host after Join
 - `ping_keep_amount` — HUD RTT is the minimum of this many recent samples
 
-Play always goes through a relay room (localhost server + your own room is fine). After Join, Start means **ready**. When every seated player has started, the server sends a UDP Kickoff; each client waits `remaining_ms - RTT/2` then arms the sim timer. A missing or invalid Networking.json logs an error and does not start comms.
+Play always goes through a relay room (localhost server + your own room is fine). After Join, Start means **ready**. When every seated player has started, the server sends a UDP Kickoff; each client waits `remaining_ms - RTT/2` then arms the sim pacer (`T0`). A missing or invalid Networking.json logs an error and does not start comms.
 
 ## Simulation model
 

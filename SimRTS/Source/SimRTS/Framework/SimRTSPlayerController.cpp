@@ -272,6 +272,8 @@ void ASimRTSPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &ASimRTSPlayerController::OnLeftReleased);
 	InputComponent->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &ASimRTSPlayerController::OnRightPressed);
 	InputComponent->BindKey(EKeys::RightMouseButton, IE_Released, this, &ASimRTSPlayerController::OnRightReleased);
+	InputComponent->BindKey(EKeys::H, IE_Pressed, this, &ASimRTSPlayerController::OnHaltPressed);
+	InputComponent->BindKey(EKeys::J, IE_Pressed, this, &ASimRTSPlayerController::OnResumePressed);
 }
 
 void ASimRTSPlayerController::PlayerTick(float DeltaTime)
@@ -394,4 +396,36 @@ void ASimRTSPlayerController::OnRightReleased()
 	{
 		OrderManager->HandleRightClick(this, SelectionManager);
 	}
+}
+
+void ASimRTSPlayerController::OnHaltPressed()
+{
+	if (MainMenu != nullptr)
+	{
+		return;
+	}
+
+	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
+	if (GameMode == nullptr || !GameMode->AreTickHaltKeysEnabled() || !GameMode->IsSimClockStarted())
+	{
+		return;
+	}
+
+	GameMode->SetSimTickHalted(true);
+}
+
+void ASimRTSPlayerController::OnResumePressed()
+{
+	if (MainMenu != nullptr)
+	{
+		return;
+	}
+
+	ASimRTSGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<ASimRTSGameMode>() : nullptr;
+	if (GameMode == nullptr || !GameMode->AreTickHaltKeysEnabled() || !GameMode->IsSimClockStarted())
+	{
+		return;
+	}
+
+	GameMode->SetSimTickHalted(false);
 }

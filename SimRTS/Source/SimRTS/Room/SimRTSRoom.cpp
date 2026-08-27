@@ -3,6 +3,7 @@
 #include "SimRTSGameMode.h"
 #include "UnitViewManager.h"
 #include "Engine/World.h"
+#include "HAL/PlatformTime.h"
 #include "TimerManager.h"
 
 USimRTSRoom::USimRTSRoom()
@@ -45,21 +46,15 @@ void USimRTSRoom::StartClock(ASimRTSGameMode& GameMode)
 		return;
 	}
 
-	const int32 TicksPerSecond = FMath::Max(1, Bridge.GetStaticData().ticks_per_second);
-	const float SimTickInterval = 1.f / static_cast<float>(TicksPerSecond);
-
-	if (UWorld* World = GameMode.GetWorld())
-	{
-		World->GetTimerManager().SetTimer(
-			SimTimerHandle,
-			this,
-			&USimRTSRoom::OnSimTick,
-			SimTickInterval,
-			true);
-	}
-
+	OriginSeconds = FPlatformTime::Seconds();
+	bTickHalted = false;
 	bClockStarted = true;
-	UE_LOG(LogTemp, Log, TEXT("SimRTS sim clock started (interval=%.3fs)"), SimTickInterval);
+	ScheduleNextAttempt(GameMode);
+
+	const int32 TicksPerSecond = FMath::Max(1, Bridge.GetStaticData().ticks_per_second);
+	UE_LOG(LogTemp, Log, TEXT("SimRTS sim clock started (tps=%d min_delay=%.3fs)"),
+		TicksPerSecond,
+		GameMode.GetMinTickDelaySeconds());
 }
 
 void USimRTSRoom::Stop(ASimRTSGameMode& GameMode)
@@ -71,11 +66,52 @@ void USimRTSRoom::Stop(ASimRTSGameMode& GameMode)
 
 	bLoaded = false;
 	bClockStarted = false;
+	bTickHalted = false;
+	OriginSeconds = 0.0;
+}
+
+void USimRTSRoom::SetTickHalted(bool bHalted)
+{
+	if (!bClockStarted || bTickHalted == bHalted)
+	{
+		return;
+	}
+
+	bTickHalted = bHalted;
+
+	ASimRTSGameMode* GameMode = Cast<ASimRTSGameMode>(GetOuter());
+	if (GameMode == nullptr)
+	{
+		return;
+	}
+
+	if (bTickHalted)
+	{
+		if (UWorld* World = GameMode->GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(SimTimerHandle);
+		}
+		return;
+	}
+
+	ScheduleNextAttempt(*GameMode);
+}
+
+int32 USimRTSRoom::GetTicksBehind() const
+{
+	if (!bClockStarted)
+	{
+		return 0;
+	}
+
+	const double TicksPerSecond = FMath::Max(1, Bridge.GetStaticData().ticks_per_second);
+	const int32 Expected = FMath::FloorToInt32((FPlatformTime::Seconds() - OriginSeconds) * TicksPerSecond);
+	return FMath::Max(0, Expected - Bridge.GetTick());
 }
 
 void USimRTSRoom::OnSimTick()
 {
-	if (!bLoaded)
+	if (!bLoaded || bTickHalted)
 	{
 		return;
 	}
@@ -92,4 +128,37 @@ void USimRTSRoom::OnSimTick()
 	{
 		UnitViewManager->SyncActors(GameMode);
 	}
+
+	if (GameMode != nullptr && bClockStarted && !bTickHalted)
+	{
+		ScheduleNextAttempt(*GameMode);
+	}
+}
+
+void USimRTSRoom::ScheduleNextAttempt(ASimRTSGameMode& GameMode)
+{
+	UWorld* World = GameMode.GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	const float Wait = ComputeWaitSeconds(GameMode.GetMinTickDelaySeconds());
+	World->GetTimerManager().SetTimer(
+		SimTimerHandle,
+		this,
+		&USimRTSRoom::OnSimTick,
+		Wait,
+		false);
+}
+
+double USimRTSRoom::ComputeWaitSeconds(double MinTickDelaySeconds) const
+{
+	const double TicksPerSecond = FMath::Max(1, Bridge.GetStaticData().ticks_per_second);
+	const double Wait = OriginSeconds + (Bridge.GetTick() + 1) / TicksPerSecond - FPlatformTime::Seconds();
+	if (Wait < MinTickDelaySeconds)
+	{
+		return MinTickDelaySeconds;
+	}
+	return Wait;
 }

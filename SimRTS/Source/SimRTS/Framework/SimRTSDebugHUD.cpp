@@ -53,6 +53,23 @@ void ASimRTSDebugHUD::DrawHUD()
 
 	DrawText(FString::Printf(TEXT("Tick: %d"), Tick), FLinearColor::White, X, Y, Font, Scale);
 	Y += LineHeight;
+	if (GameMode->IsSimClockStarted())
+	{
+		if (GameMode->IsSimTickHalted())
+		{
+			DrawText(TEXT("Halted"), FLinearColor::Yellow, X, Y, Font, Scale);
+			Y += LineHeight;
+		}
+		else
+		{
+			const int32 Behind = GameMode->GetSimTicksBehind();
+			if (Behind > 0)
+			{
+				DrawText(FString::Printf(TEXT("Catch-up: %d"), Behind), FLinearColor::Yellow, X, Y, Font, Scale);
+				Y += LineHeight;
+			}
+		}
+	}
 	DrawText(FString::Printf(TEXT("Units: %d"), Units), FLinearColor::White, X, Y, Font, Scale);
 	Y += LineHeight;
 	const int32 RttMs = GameMode->GetMinRttMs();
