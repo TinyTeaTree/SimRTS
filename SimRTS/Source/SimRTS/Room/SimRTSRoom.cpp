@@ -111,6 +111,17 @@ int32 USimRTSRoom::GetTicksBehind() const
 	return FMath::Max(0, Expected - Bridge.GetTick() - 1);
 }
 
+int32 USimRTSRoom::GetActualTick() const
+{
+	if (!bClockStarted)
+	{
+		return 0;
+	}
+
+	const double TicksPerSecond = FMath::Max(1, Bridge.GetStaticData().ticks_per_second);
+	return FMath::FloorToInt32((FPlatformTime::Seconds() - OriginSeconds) * TicksPerSecond);
+}
+
 void USimRTSRoom::OnSimTick()
 {
 	if (!bLoaded || bTickHalted)
@@ -119,11 +130,6 @@ void USimRTSRoom::OnSimTick()
 	}
 
 	ASimRTSGameMode* GameMode = Cast<ASimRTSGameMode>(GetOuter());
-	if (GameMode != nullptr)
-	{
-		GameMode->FlushDelayedMoveOrders();
-	}
-
 	Bridge.StepForward();
 
 	if (GameMode != nullptr && UnitViewManager != nullptr)

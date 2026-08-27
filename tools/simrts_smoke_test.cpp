@@ -444,6 +444,29 @@ int main() {
         }
     }
 
+    {
+        TickEngine scheduled_engine;
+        Level scheduled_level = MakeSmokeLevel();
+        scheduled_engine.LoadLevel(scheduled_level);
+        Order delayed;
+        delayed.player_id = 2;
+        delayed.unit_ids = {1};
+        delayed.target = {20, 10};
+        scheduled_engine.SubmitScheduled(delayed, 12, 5);
+        scheduled_engine.SubmitScheduled(delayed, 12, 5);
+        const Vec2i start = scheduled_engine.FindUnit(1)->position;
+        for (int i = 0; i < 5; ++i) {
+            scheduled_engine.StepForward();
+            if (scheduled_engine.FindUnit(1)->position != start || scheduled_engine.FindUnit(1)->move.active) {
+                Fail("scheduled order should not activate before scheduled_tick");
+            }
+        }
+        scheduled_engine.StepForward();
+        if (!scheduled_engine.FindUnit(1)->move.active) {
+            Fail("scheduled order should pathfind when tick reaches scheduled_tick");
+        }
+    }
+
     std::printf("OK: line-move + is_next + pathfinding smoke test passed (tick=%d, pos=%d,%d)\n",
                 path_engine.GetTick(),
                 path_engine.FindUnit(1)->position.x,

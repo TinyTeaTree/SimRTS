@@ -18,6 +18,14 @@ public:
 		int32 TargetY,
 		bool bIsNext = false,
 		int32 PlayerId = 0);
+	void SubmitScheduledMoveOrder(
+		const TArray<int32>& UnitIds,
+		int32 TargetX,
+		int32 TargetY,
+		bool bIsNext,
+		int32 PlayerId,
+		uint32 OrderId,
+		int32 ScheduledTick);
 	void StepForward();
 
 	int32 GetTick() const;

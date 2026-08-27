@@ -14,18 +14,6 @@ class ASimRTSPathVisualizer;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnSimRTSCommsEvent, const FSimRTSCommsEventView&);
 
-USTRUCT()
-struct FDelayedMoveOrder
-{
-	GENERATED_BODY()
-
-	TArray<int32> UnitIds;
-	int32 TargetX = 0;
-	int32 TargetY = 0;
-	bool bIsNext = false;
-	int32 SendAtTick = 0;
-};
-
 UCLASS()
 class SIMRTS_API ASimRTSGameMode : public AGameModeBase
 {
@@ -62,9 +50,8 @@ public:
 
 	void SetMatchmakingMenuOpen(bool bOpen);
 
-	/** Queue a move for the UDP relay after mock_tick_lag ticks. Applied when the order bounces back. */
+	/** Send a move to the UDP relay. Applied from the bounce at actual_tick + future_tick_distance. */
 	void SubmitMoveOrder(const TArray<int32>& UnitIds, int32 TargetX, int32 TargetY, bool bIsNext);
-	void FlushDelayedMoveOrders();
 
 	bool IsMatchmakingLoggedIn() const;
 	FString GetMatchmakingNickname() const;
@@ -78,6 +65,7 @@ public:
 	void SetSimTickHalted(bool bHalted);
 	bool IsSimTickHalted() const;
 	int32 GetSimTicksBehind() const;
+	int32 GetActualTick() const;
 
 	FOnSimRTSCommsEvent OnCommsEvent;
 
@@ -128,9 +116,9 @@ private:
 	TObjectPtr<USimRTSRoom> Room;
 
 	SimRTS::CommsClient Comms;
-	int32 MockTickLag = 0;
+	int32 FutureTickDistance = 5;
 	float MinTickDelaySeconds = 0.01f;
-	TArray<FDelayedMoveOrder> DelayedMoveOrders;
+	uint32 NextOrderId = 1;
 	FString JoinedMatchmakingRoomId;
 	bool bMatchmakingMenuOpen = false;
 	bool bUserRequestPending = false;

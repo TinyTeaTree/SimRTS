@@ -51,16 +51,16 @@ FNetworkingLoadResult NetworkingLoader::ParseJsonString(const FString& JsonText)
 		return Result;
 	}
 
-	double LagNumber = 0.0;
-	if (!Root->TryGetNumberField(TEXT("mock_tick_lag"), LagNumber))
+	double FutureTickNumber = 0.0;
+	if (!Root->TryGetNumberField(TEXT("future_tick_distance"), FutureTickNumber))
 	{
-		Result.Error = TEXT("networking: missing mock_tick_lag");
+		Result.Error = TEXT("networking: missing future_tick_distance");
 		return Result;
 	}
-	const int32 MockTickLag = static_cast<int32>(LagNumber);
-	if (MockTickLag < 0)
+	const int32 FutureTickDistance = static_cast<int32>(FutureTickNumber);
+	if (FutureTickDistance < 1)
 	{
-		Result.Error = TEXT("networking: mock_tick_lag must be >= 0");
+		Result.Error = TEXT("networking: future_tick_distance must be >= 1");
 		return Result;
 	}
 
@@ -106,7 +106,7 @@ FNetworkingLoadResult NetworkingLoader::ParseJsonString(const FString& JsonText)
 	Result.Config.Ip = Ip;
 	Result.Config.Port = Port;
 	Result.Config.UdpPort = UdpPort;
-	Result.Config.MockTickLag = MockTickLag;
+	Result.Config.FutureTickDistance = FutureTickDistance;
 	Result.Config.PingIntervalMs = PingIntervalMs;
 	Result.Config.PingKeepAmount = PingKeepAmount;
 	Result.Config.PacerMinDelayMs = PacerMinDelayMs;

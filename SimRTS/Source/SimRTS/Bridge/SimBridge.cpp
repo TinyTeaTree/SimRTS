@@ -70,6 +70,28 @@ void FSimBridge::SubmitMoveOrder(
 	Engine.SubmitOrder(std::move(Order));
 }
 
+void FSimBridge::SubmitScheduledMoveOrder(
+	const TArray<int32>& UnitIds,
+	int32 TargetX,
+	int32 TargetY,
+	bool bIsNext,
+	int32 PlayerId,
+	uint32 OrderId,
+	int32 ScheduledTick)
+{
+	SimRTS::Order Order;
+	Order.player_id = PlayerId;
+	Order.type = SimRTS::OrderType::Move;
+	Order.target = {TargetX, TargetY};
+	Order.is_next = bIsNext;
+	Order.unit_ids.reserve(UnitIds.Num());
+	for (int32 Id : UnitIds)
+	{
+		Order.unit_ids.push_back(Id);
+	}
+	Engine.SubmitScheduled(std::move(Order), OrderId, ScheduledTick);
+}
+
 void FSimBridge::StepForward()
 {
 	Engine.StepForward();

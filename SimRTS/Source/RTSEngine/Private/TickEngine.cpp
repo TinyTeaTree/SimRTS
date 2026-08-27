@@ -356,6 +356,8 @@ void TickEngine::LoadLevel(const Level& level) {
         unit.rotation = NormalizeDegrees(spawn.rotation);
         state_.units.push_back(unit);
     }
+
+    scheduled_.clear();
 }
 
 void TickEngine::SubmitOrder(Order order) {
@@ -448,7 +450,48 @@ void TickEngine::SubmitOrder(Order order) {
     }
 }
 
+void TickEngine::SubmitScheduled(Order order, uint32_t order_id, Tick scheduled_tick) {
+    if (order.unit_ids.empty()) {
+        return;
+    }
+    for (const ScheduledCommand& command : scheduled_) {
+        if (command.order.player_id == order.player_id && command.order_id == order_id) {
+            return;
+        }
+    }
+    ScheduledCommand command;
+    command.order = std::move(order);
+    command.order_id = order_id;
+    command.scheduled_tick = scheduled_tick;
+    scheduled_.push_back(std::move(command));
+}
+
+void TickEngine::ActivateScheduled() {
+    std::vector<ScheduledCommand> due;
+    std::vector<ScheduledCommand> keep;
+    due.reserve(scheduled_.size());
+    keep.reserve(scheduled_.size());
+    for (ScheduledCommand& command : scheduled_) {
+        if (command.scheduled_tick <= tick_) {
+            due.push_back(std::move(command));
+        } else {
+            keep.push_back(std::move(command));
+        }
+    }
+    scheduled_ = std::move(keep);
+    std::sort(due.begin(), due.end(), [](const ScheduledCommand& a, const ScheduledCommand& b) {
+        if (a.order.player_id != b.order.player_id) {
+            return a.order.player_id < b.order.player_id;
+        }
+        return a.order_id < b.order_id;
+    });
+    for (ScheduledCommand& command : due) {
+        SubmitOrder(std::move(command.order));
+    }
+}
+
 void TickEngine::StepForward() {
+    ActivateScheduled();
     ApplyOrders();
     AdvanceMovement();
     // Units that finished a segment this tick can start the next is_next waypoint immediately.

@@ -454,7 +454,13 @@ bool DecodeUdpOrderBody(const uint8_t* data, int size, int off, CommsOrder& orde
 		}
 		order.unit_ids.push_back(id);
 	}
-	return ReadI32(data, size, off, order.sim_player_id);
+	if (!ReadI32(data, size, off, order.sim_player_id)) {
+		return false;
+	}
+	if (!ReadU32(data, size, off, order.order_id)) {
+		return false;
+	}
+	return ReadI32(data, size, off, order.actual_tick);
 }
 
 bool EncodeUdpHello(const std::string& room_id, const std::string& player_id, const std::string& token, std::vector<uint8_t>& out) {
@@ -490,6 +496,8 @@ bool EncodeUdpOrder(
 		PutI32(out, id);
 	}
 	PutI32(out, order.sim_player_id);
+	PutU32(out, order.order_id);
+	PutI32(out, order.actual_tick);
 	return out.size() <= kUdpMaxPacket;
 }
 

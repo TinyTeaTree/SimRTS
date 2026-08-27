@@ -55,6 +55,8 @@ void ASimRTSDebugHUD::DrawHUD()
 	Y += LineHeight;
 	if (GameMode->IsSimClockStarted())
 	{
+		DrawText(FString::Printf(TEXT("Actual Tick: %d"), GameMode->GetActualTick()), FLinearColor::White, X, Y, Font, Scale);
+		Y += LineHeight;
 		if (GameMode->IsSimTickHalted())
 		{
 			DrawText(TEXT("Halted"), FLinearColor::Yellow, X, Y, Font, Scale);

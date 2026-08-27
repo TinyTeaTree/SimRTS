@@ -53,10 +53,14 @@ void RelayMoveOrder(
 	const TArray<int32>& UnitIds,
 	int32 TargetX,
 	int32 TargetY,
-	bool bIsNext)
+	bool bIsNext,
+	uint32 OrderId,
+	int32 ActualTick)
 {
 	SimRTS::CommsOrder Order;
 	Order.sim_player_id = SimPlayerIdFromLogin(Comms.PlayerId());
+	Order.order_id = OrderId;
+	Order.actual_tick = ActualTick;
 	Order.target_x = TargetX;
 	Order.target_y = TargetY;
 	Order.type = 0;
@@ -99,16 +103,16 @@ void ASimRTSGameMode::BeginPlay()
 	}
 	else
 	{
-		MockTickLag = Networking.Config.MockTickLag;
+		FutureTickDistance = Networking.Config.FutureTickDistance;
 		MinTickDelaySeconds = Networking.Config.PacerMinDelayMs / 1000.f;
 		Comms.SetHost(FStringToComms(Networking.Config.Ip), Networking.Config.Port, Networking.Config.UdpPort);
 		Comms.SetPingConfig(Networking.Config.PingIntervalMs, Networking.Config.PingKeepAmount);
 		Comms.Start();
-		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d udp=%d mock_tick_lag=%d ping=%dms keep=%d pacer_min_delay=%dms"),
+		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d udp=%d future_tick_distance=%d ping=%dms keep=%d pacer_min_delay=%dms"),
 			*Networking.Config.Ip,
 			Networking.Config.Port,
 			Networking.Config.UdpPort,
-			MockTickLag,
+			FutureTickDistance,
 			Networking.Config.PingIntervalMs,
 			Networking.Config.PingKeepAmount,
 			Networking.Config.PacerMinDelayMs);
@@ -142,7 +146,6 @@ void ASimRTSGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		Room->Stop(*this);
 	}
-	DelayedMoveOrders.Reset();
 	DestroyDebugVisualizers();
 
 	Super::EndPlay(EndPlayReason);
@@ -244,45 +247,13 @@ void ASimRTSGameMode::SetMatchmakingMenuOpen(bool bOpen)
 
 void ASimRTSGameMode::SubmitMoveOrder(const TArray<int32>& UnitIds, int32 TargetX, int32 TargetY, bool bIsNext)
 {
-	if (!IsRoomLoaded() || JoinedMatchmakingRoomId.IsEmpty() || UnitIds.Num() == 0)
+	if (!IsRoomLoaded() || !IsSimClockStarted() || JoinedMatchmakingRoomId.IsEmpty() || UnitIds.Num() == 0)
 	{
 		return;
 	}
 
-	if (MockTickLag <= 0)
-	{
-		RelayMoveOrder(Comms, UnitIds, TargetX, TargetY, bIsNext);
-		return;
-	}
-
-	FDelayedMoveOrder Delayed;
-	Delayed.UnitIds = UnitIds;
-	Delayed.TargetX = TargetX;
-	Delayed.TargetY = TargetY;
-	Delayed.bIsNext = bIsNext;
-	Delayed.SendAtTick = GetBridge().GetTick() + MockTickLag;
-	DelayedMoveOrders.Add(MoveTemp(Delayed));
-}
-
-void ASimRTSGameMode::FlushDelayedMoveOrders()
-{
-	if (!IsRoomLoaded() || DelayedMoveOrders.Num() == 0)
-	{
-		return;
-	}
-
-	const int32 CurrentTick = GetBridge().GetTick();
-	for (int32 Index = DelayedMoveOrders.Num() - 1; Index >= 0; --Index)
-	{
-		const FDelayedMoveOrder& Delayed = DelayedMoveOrders[Index];
-		if (CurrentTick < Delayed.SendAtTick)
-		{
-			continue;
-		}
-
-		RelayMoveOrder(Comms, Delayed.UnitIds, Delayed.TargetX, Delayed.TargetY, Delayed.bIsNext);
-		DelayedMoveOrders.RemoveAt(Index);
-	}
+	const uint32 OrderId = NextOrderId++;
+	RelayMoveOrder(Comms, UnitIds, TargetX, TargetY, bIsNext, OrderId, GetActualTick());
 }
 
 bool ASimRTSGameMode::IsMatchmakingLoggedIn() const
@@ -321,6 +292,11 @@ bool ASimRTSGameMode::IsSimTickHalted() const
 int32 ASimRTSGameMode::GetSimTicksBehind() const
 {
 	return Room != nullptr ? Room->GetTicksBehind() : 0;
+}
+
+int32 ASimRTSGameMode::GetActualTick() const
+{
+	return Room != nullptr ? Room->GetActualTick() : 0;
 }
 
 void ASimRTSGameMode::HandleKickoff(uint32 KickoffId, int32 RemainingMs)
@@ -406,12 +382,23 @@ void ASimRTSGameMode::PumpComms()
 				{
 					UnitIds.Add(Id);
 				}
-				GetBridge().SubmitMoveOrder(
+				const int32 ScheduledTick = Event.result.order.actual_tick + FutureTickDistance;
+				if (ScheduledTick < GetBridge().GetTick())
+				{
+					UE_LOG(LogTemp, Warning, TEXT("SimRTS late order id=%u actual=%d scheduled=%d sim=%d"),
+						Event.result.order.order_id,
+						Event.result.order.actual_tick,
+						ScheduledTick,
+						GetBridge().GetTick());
+				}
+				GetBridge().SubmitScheduledMoveOrder(
 					UnitIds,
 					Event.result.order.target_x,
 					Event.result.order.target_y,
 					Event.result.order.is_next,
-					Event.result.order.sim_player_id);
+					Event.result.order.sim_player_id,
+					Event.result.order.order_id,
+					ScheduledTick);
 			}
 			continue;
 		}
@@ -437,7 +424,6 @@ void ASimRTSGameMode::PumpComms()
 		else if (Event.kind == SimRTS::CommsEventKind::LeaveRoom && Event.result.ok)
 		{
 			JoinedMatchmakingRoomId.Empty();
-			DelayedMoveOrders.Reset();
 			bKickoffArmed = false;
 			PendingKickoffRemainingMs = -1;
 			PendingKickoffId = 0;

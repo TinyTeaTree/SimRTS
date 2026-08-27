@@ -34,6 +34,7 @@ public:
 	void SetTickHalted(bool bHalted);
 	bool IsTickHalted() const { return bTickHalted; }
 	int32 GetTicksBehind() const;
+	int32 GetActualTick() const;
 
 	FSimBridge& GetBridge() { return Bridge; }
 	const FSimBridge& GetBridge() const { return Bridge; }
