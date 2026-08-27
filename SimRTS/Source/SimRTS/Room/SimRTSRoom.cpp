@@ -106,7 +106,9 @@ int32 USimRTSRoom::GetTicksBehind() const
 
 	const double TicksPerSecond = FMath::Max(1, Bridge.GetStaticData().ticks_per_second);
 	const int32 Expected = FMath::FloorToInt32((FPlatformTime::Seconds() - OriginSeconds) * TicksPerSecond);
-	return FMath::Max(0, Expected - Bridge.GetTick());
+	// One tick of slack: late this interval is a shorter next wait, not zoom.
+	// Catch-up only if we are still behind after a full 1/tps.
+	return FMath::Max(0, Expected - Bridge.GetTick() - 1);
 }
 
 void USimRTSRoom::OnSimTick()

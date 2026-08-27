@@ -73,7 +73,7 @@ Docs: [`Project.md`](../Project.md) currently says Unreal timer = `1 / ticks_per
 - GameMode `bEnableTickHaltKeys` (default **true**)
 - [`ASimRTSPlayerController::SetupInputComponent`](../SimRTS/Source/SimRTS/Framework/SimRTSPlayerController.cpp): `H` halt, `J` resume. Ignore when the main menu is up, the clock is not running, or the toggle is off.
 - While halted, do not `StepForward`; `T0` is unchanged so wall time keeps moving. On resume the next wait is below min → zoom.
-- HUD: `Halted` or `Catch-up: N` when behind
+- HUD: `Halted` or `Catch-up: N` when still behind after a full `1/tps` (one tick of slack; a short next wait is not zoom)
 
 How to test: Start a local room (~30 tps). `H` freezes tick/units. `J` fast-forwards until waits return to ~33ms. Toggle off: keys do nothing.
 
