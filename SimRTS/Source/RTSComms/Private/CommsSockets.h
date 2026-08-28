@@ -19,7 +19,9 @@ using TcpSocket = SOCKET;
 inline constexpr TcpSocket kInvalidTcp = INVALID_SOCKET;
 #else
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <sys/time.h>
@@ -130,6 +132,195 @@ inline int TcpRecvSome(TcpSocket socket, char* buffer, int capacity) {
 using UdpSocket = TcpSocket;
 inline constexpr UdpSocket kInvalidUdp = kInvalidTcp;
 
+inline bool UdpSetNonBlock(UdpSocket socket) {
+#ifdef _WIN32
+	u_long mode = 1;
+	return ioctlsocket(socket, FIONBIO, &mode) == 0;
+#else
+	const int flags = fcntl(socket, F_GETFL, 0);
+	if (flags < 0) {
+		return false;
+	}
+	return fcntl(socket, F_SETFL, flags | O_NONBLOCK) == 0;
+#endif
+}
+
+struct UdpWake {
+	UdpSocket socket = kInvalidUdp;
+	uint16_t port = 0;
+};
+
+inline bool UdpWakeOpen(UdpWake* wake, std::string* error) {
+	if (wake == nullptr) {
+		return false;
+	}
+	wake->socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (wake->socket == kInvalidUdp) {
+		if (error != nullptr) {
+			*error = "udp wake socket: " + TcpLastError();
+		}
+		return false;
+	}
+	sockaddr_in addr{};
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	addr.sin_port = 0;
+	if (bind(wake->socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+		if (error != nullptr) {
+			*error = "udp wake bind: " + TcpLastError();
+		}
+		TcpClose(wake->socket);
+		wake->socket = kInvalidUdp;
+		return false;
+	}
+	sockaddr_in bound{};
+#ifdef _WIN32
+	int len = sizeof(bound);
+#else
+	socklen_t len = sizeof(bound);
+#endif
+	if (getsockname(wake->socket, reinterpret_cast<sockaddr*>(&bound), &len) != 0) {
+		if (error != nullptr) {
+			*error = "udp wake name: " + TcpLastError();
+		}
+		TcpClose(wake->socket);
+		wake->socket = kInvalidUdp;
+		return false;
+	}
+	wake->port = ntohs(bound.sin_port);
+	if (!UdpSetNonBlock(wake->socket)) {
+		if (error != nullptr) {
+			*error = "udp wake nonblock: " + TcpLastError();
+		}
+		TcpClose(wake->socket);
+		wake->socket = kInvalidUdp;
+		wake->port = 0;
+		return false;
+	}
+	return true;
+}
+
+inline void UdpWakeClose(UdpWake* wake) {
+	if (wake == nullptr) {
+		return;
+	}
+	TcpClose(wake->socket);
+	wake->socket = kInvalidUdp;
+	wake->port = 0;
+}
+
+inline void UdpWakeNotify(const UdpWake& wake) {
+	if (wake.socket == kInvalidUdp || wake.port == 0) {
+		return;
+	}
+	sockaddr_in addr{};
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(wake.port);
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	const char byte = 0;
+#ifdef _WIN32
+	::sendto(wake.socket, &byte, 1, 0, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+#else
+	::sendto(wake.socket, &byte, 1, 0, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+#endif
+}
+
+inline void UdpWakeDrain(UdpSocket socket) {
+	if (socket == kInvalidUdp) {
+		return;
+	}
+	char buf[8];
+	for (;;) {
+#ifdef _WIN32
+		const int n = ::recvfrom(socket, buf, sizeof(buf), 0, nullptr, nullptr);
+		if (n == SOCKET_ERROR) {
+			break;
+		}
+#else
+		const int n = static_cast<int>(::recvfrom(socket, buf, sizeof(buf), 0, nullptr, nullptr));
+		if (n < 0) {
+			break;
+		}
+#endif
+		if (n <= 0) {
+			break;
+		}
+	}
+}
+
+struct UdpPollResult {
+	bool udp = false;
+	bool wake = false;
+};
+
+inline UdpPollResult UdpPollWait(UdpSocket udp, UdpSocket wake, int timeout_ms) {
+	UdpPollResult out;
+#ifdef _WIN32
+	WSAPOLLFD fds[2];
+	ULONG n = 0;
+	int udp_index = -1;
+	int wake_index = -1;
+	if (udp != kInvalidUdp) {
+		udp_index = static_cast<int>(n);
+		fds[n].fd = udp;
+		fds[n].events = POLLIN;
+		fds[n].revents = 0;
+		++n;
+	}
+	if (wake != kInvalidUdp) {
+		wake_index = static_cast<int>(n);
+		fds[n].fd = wake;
+		fds[n].events = POLLIN;
+		fds[n].revents = 0;
+		++n;
+	}
+	if (n == 0) {
+		return out;
+	}
+	if (WSAPoll(fds, n, timeout_ms) <= 0) {
+		return out;
+	}
+	if (udp_index >= 0 && (fds[udp_index].revents & POLLIN) != 0) {
+		out.udp = true;
+	}
+	if (wake_index >= 0 && (fds[wake_index].revents & POLLIN) != 0) {
+		out.wake = true;
+	}
+#else
+	pollfd fds[2];
+	nfds_t n = 0;
+	int udp_index = -1;
+	int wake_index = -1;
+	if (udp != kInvalidUdp) {
+		udp_index = static_cast<int>(n);
+		fds[n].fd = udp;
+		fds[n].events = POLLIN;
+		fds[n].revents = 0;
+		++n;
+	}
+	if (wake != kInvalidUdp) {
+		wake_index = static_cast<int>(n);
+		fds[n].fd = wake;
+		fds[n].events = POLLIN;
+		fds[n].revents = 0;
+		++n;
+	}
+	if (n == 0) {
+		return out;
+	}
+	if (poll(fds, n, timeout_ms) <= 0) {
+		return out;
+	}
+	if (udp_index >= 0 && (fds[udp_index].revents & POLLIN) != 0) {
+		out.udp = true;
+	}
+	if (wake_index >= 0 && (fds[wake_index].revents & POLLIN) != 0) {
+		out.wake = true;
+	}
+#endif
+	return out;
+}
+
 inline UdpSocket UdpOpenBind(std::string* error) {
 	const UdpSocket socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (socket == kInvalidUdp) {
@@ -151,15 +342,13 @@ inline UdpSocket UdpOpenBind(std::string* error) {
 		return kInvalidUdp;
 	}
 
-#ifdef _WIN32
-	DWORD timeout_ms = 50;
-	setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
-#else
-	timeval timeout{};
-	timeout.tv_sec = 0;
-	timeout.tv_usec = 50000;
-	setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-#endif
+	if (!UdpSetNonBlock(socket)) {
+		if (error != nullptr) {
+			*error = "udp nonblock: " + TcpLastError();
+		}
+		TcpClose(socket);
+		return kInvalidUdp;
+	}
 	return socket;
 }
 

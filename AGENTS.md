@@ -47,7 +47,7 @@ Deterministic tick sim. Same inputs + same tick → same `BattleState`.
 
 Vendor-agnostic matchmaking **client**. Talks HTTP to RTSServer. Not the sim, not Unreal UI.
 
-**Scope:** `SimRTS/Source/RTSComms/`. Protocol contract: [`Server.md`](Server.md). Plans: [`Plans/rtscomms.plan.md`](Plans/rtscomms.plan.md), [`Plans/endian_independent.plan.md`](Plans/endian_independent.plan.md).
+**Scope:** `SimRTS/Source/RTSComms/`. Protocol contract: [`Server.md`](Server.md). Plans: [`Plans/rtscomms.plan.md`](Plans/rtscomms.plan.md), [`Plans/endian_independent.plan.md`](Plans/endian_independent.plan.md), [`Plans/socket_immediate_send.plan.md`](Plans/socket_immediate_send.plan.md).
 
 **Do:**
 

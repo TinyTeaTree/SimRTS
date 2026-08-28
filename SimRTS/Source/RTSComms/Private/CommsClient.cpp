@@ -3,7 +3,6 @@
 #include "RttSampler.h"
 
 #include <chrono>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <condition_variable>
@@ -582,6 +581,7 @@ struct CommsClient::Impl {
 	std::queue<CommsEvent> results;
 
 	UdpSocket udp_socket = kInvalidUdp;
+	UdpWake udp_wake;
 	std::mutex udp_mu;
 	std::condition_variable udp_cv;
 	std::queue<std::vector<uint8_t>> udp_out;
@@ -612,9 +612,23 @@ struct CommsClient::Impl {
 		session = std::move(next);
 	}
 
+	void WakeUdpLoop() {
+		UdpWake wake;
+		{
+			std::lock_guard<std::mutex> lock(udp_mu);
+			wake = udp_wake;
+		}
+		UdpWakeNotify(wake);
+	}
+
 	void QueueUdp(std::vector<uint8_t> packet) {
-		std::lock_guard<std::mutex> lock(udp_mu);
-		udp_out.push(std::move(packet));
+		UdpWake wake;
+		{
+			std::lock_guard<std::mutex> lock(udp_mu);
+			udp_out.push(std::move(packet));
+			wake = udp_wake;
+		}
+		UdpWakeNotify(wake);
 	}
 
 	bool EnsureUdp(std::string* error) {
@@ -752,12 +766,17 @@ struct CommsClient::Impl {
 	}
 
 	void UdpLoop() {
+		UdpWake wake;
+		if (UdpWakeOpen(&wake, nullptr)) {
+			std::lock_guard<std::mutex> lock(udp_mu);
+			udp_wake = wake;
+		}
 		char buf[kUdpMaxPacket];
 		while (true) {
 			{
 				std::lock_guard<std::mutex> lock(request_mu);
 				if (stop) {
-					return;
+					break;
 				}
 			}
 			DrainUdpOut();
@@ -768,15 +787,32 @@ struct CommsClient::Impl {
 				std::lock_guard<std::mutex> lock(udp_mu);
 				socket = udp_socket;
 			}
-			if (socket == kInvalidUdp) {
-				std::this_thread::sleep_for(std::chrono::milliseconds(20));
-				continue;
+			const int TimeoutMs = socket == kInvalidUdp ? 20 : 50;
+			const UdpPollResult Ready = UdpPollWait(socket, wake.socket, TimeoutMs);
+			if (Ready.wake) {
+				UdpWakeDrain(wake.socket);
 			}
-			const int n = UdpRecv(socket, buf, sizeof(buf));
-			if (n > 0) {
-				HandleUdpPacket(reinterpret_cast<const uint8_t*>(buf), n);
+			{
+				std::lock_guard<std::mutex> lock(request_mu);
+				if (stop) {
+					break;
+				}
+			}
+			if (Ready.udp && socket != kInvalidUdp) {
+				for (;;) {
+					const int n = UdpRecv(socket, buf, sizeof(buf));
+					if (n <= 0) {
+						break;
+					}
+					HandleUdpPacket(reinterpret_cast<const uint8_t*>(buf), n);
+				}
 			}
 		}
+		{
+			std::lock_guard<std::mutex> lock(udp_mu);
+			udp_wake = UdpWake{};
+		}
+		UdpWakeClose(&wake);
 	}
 
 	bool HelloForJoin(const std::string& room_id, std::string& error) {
@@ -943,18 +979,19 @@ void CommsClient::Stop() {
 	}
 	impl_->request_cv.notify_all();
 	impl_->udp_cv.notify_all();
+	impl_->WakeUdpLoop();
+	if (impl_->worker.joinable()) {
+		impl_->worker.join();
+	}
+	if (impl_->udp_worker.joinable()) {
+		impl_->udp_worker.join();
+	}
 	{
 		std::lock_guard<std::mutex> lock(impl_->udp_mu);
 		if (impl_->udp_socket != kInvalidUdp) {
 			TcpClose(impl_->udp_socket);
 			impl_->udp_socket = kInvalidUdp;
 		}
-	}
-	if (impl_->worker.joinable()) {
-		impl_->worker.join();
-	}
-	if (impl_->udp_worker.joinable()) {
-		impl_->udp_worker.join();
 	}
 	std::lock_guard<std::mutex> lock(impl_->request_mu);
 	impl_->running = false;
