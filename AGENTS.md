@@ -19,6 +19,7 @@ Unreal game layer: display, input, HUD, UI, JSON I/O, bridge into the sim. Edito
 **Do:**
 
 - Keep SimRTS **block-free**. Game thread never waits on HTTP, sockets, or RTSComms I/O. Enqueue work, pump `TryPop` / sim ticks only.
+- Clicks call `SubmitMoveOrder` / `SendOrder` on that Unreal frame; the pacer must not batch or delay them ([`Plans/immediate_sends.plan.md`](Plans/immediate_sends.plan.md)).
 - Selection and camera stay Unreal-only. Orders go into RTSEngine through `FSimBridge` (`SubmitMoveOrder`), not by mutating `BattleState` from actors.
 - Load levels with `LevelLoader` → `Level` → `TickEngine::LoadLevel`. Do not put JSON parsers in RTSEngine.
 - Unit actors follow sim positions each tick via `UUnitViewManager`. Do not replicate unit actors.

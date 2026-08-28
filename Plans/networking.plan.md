@@ -99,6 +99,8 @@ Stop treating `ASimRTSGameMode`'s local timer as the authority in a session.
 
 For tick `T`: collect every player's command list (**empty is valid**), apply in **stable player-id order**, `StepForward`, hash. Offline: delay 0, one local player, same code path.
 
+A client missing that full set is **locked** (`GetTick()` does not advance). It must still emit AT-cadence frames so it does not stall the room: [`altruistic_locking.plan.md`](altruistic_locking.plan.md).
+
 ### Threading
 
 - Socket threads: recv, checksum of bytes, push into a lock-free / mutex queue.

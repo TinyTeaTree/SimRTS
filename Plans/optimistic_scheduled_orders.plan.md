@@ -78,7 +78,7 @@ Late packet (`scheduled_tick` already past): still activates this step. That is 
 
 ## SimRTS wiring
 
-Send on click immediately. Apply only from the bounce, into the cache — originator does not `SubmitOrder` locally on click.
+Send on click immediately ([`immediate_sends.plan.md`](immediate_sends.plan.md)). Apply only from the bounce, into the cache — originator does not `SubmitOrder` locally on click.
 
 **Delete `mock_tick_lag` entirely.** It delayed send; FTD delays activate. Do not keep the JSON key, a fallback, or a unused GameMode field.
 
@@ -96,4 +96,4 @@ Clock not started → do not send (already requires a loaded room).
 
 [`Project.md`](../Project.md): FTD, AT, scheduled tick; no `mock_tick_lag`. HUD: optional Actual Tick next to sim Tick (cheap debug).
 
-Out of scope: hashes, resend, empty frames, wait-for-all, FTD auto-tuning, RTSServer behavior, `TickEngine` math.
+Out of scope: hashes, resend, empty frames, wait-for-all, FTD auto-tuning, RTSServer behavior, `TickEngine` math. Wait-for-all send-while-stalled is [`altruistic_locking.plan.md`](altruistic_locking.plan.md).

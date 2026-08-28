@@ -22,7 +22,7 @@ Yes: this is a good next slice, and **yes, it belongs in the final lockstep solu
 
 The pacer is **not** a frame loop and does not decide whether a tick happens. It only answers: **how long until the next attempt to tick?**
 
-Today that attempt always ticks (`StepForward`). Lockstep later may no-op an attempt if command frames are missing. That is not the pacer’s job.
+Today that attempt always ticks (`StepForward`). Lockstep later may no-op an attempt if command frames are missing. That is not the pacer’s job. A client that no-ops is **locked**; it must still send on the AT cadence — [`altruistic_locking.plan.md`](altruistic_locking.plan.md). Clicks must not wait for this timer — [`immediate_sends.plan.md`](immediate_sends.plan.md).
 
 This slice is **Simulation only**. Do not change RTSEngine, RTSComms, or RTSServer.
 
@@ -72,9 +72,9 @@ Docs: [`Project.md`](../Project.md) currently says Unreal timer = `1 / ticks_per
 
 - GameMode `bEnableTickHaltKeys` (default **true**)
 - [`ASimRTSPlayerController::SetupInputComponent`](../SimRTS/Source/SimRTS/Framework/SimRTSPlayerController.cpp): `H` halt, `J` resume. Ignore when the main menu is up, the clock is not running, or the toggle is off.
-- While halted, do not `StepForward`; `T0` is unchanged so wall time keeps moving. On resume the next wait is below min → zoom.
+- While halted, do not `StepForward`; `T0` is unchanged so wall time keeps moving. On resume the next wait is below min → zoom. Same AT-vs-sim split as a locked client ([`altruistic_locking.plan.md`](altruistic_locking.plan.md)).
 - HUD: `Halted` or `Catch-up: N` when still behind after a full `1/tps` (one tick of slack; a short next wait is not zoom)
 
 How to test: Start a local room (~30 tps). `H` freezes tick/units. `J` fast-forwards until waits return to ~33ms. Toggle off: keys do nothing.
 
-Out of scope: command frames, execute_tick, checksums, waiting on other players, RTSEngine math.
+Out of scope: command frames, execute_tick, checksums, waiting on other players, RTSEngine math. The pacer must not delay UDP sends — [`immediate_sends.plan.md`](immediate_sends.plan.md).
