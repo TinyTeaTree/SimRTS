@@ -24,3 +24,4 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 console.log('    Launched.');
+console.log('    If LAN Login fails with "No route to host", run: npm run troubleshoot');

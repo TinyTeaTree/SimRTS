@@ -5,7 +5,7 @@ When the user names a type (Simulation / Engine / Comms / Server), follow **Shar
 ## Shared
 
 - **Do not run git.** No `git status`, commit, push, checkout, or any other git command. The user owns version control.
-- **Do not run npm.** No `npm run compile`, `compile_open`, `compile:hot`, `open`, `server_build`, `server_local_host`, `server_nat_host`, `server_shutdown`, or other npm scripts. The user compiles, opens the editor, and starts/stops the server.
+- **Do not run npm.** No `npm run compile`, `compile_open`, `compile:hot`, `open`, `troubleshoot`, `server_build`, `server_local_host`, `server_nat_host`, `server_shutdown`, or other npm scripts. The user compiles, opens the editor, and starts/stops the server.
 - Do not start or kill Unreal Editor, `rtsserver`, or bind port 8080/8081.
 - Prefer the smallest change that matches existing style. Do not add Unreal NetDriver, Steam, or EOS.
 - Casts: follow [`Rules.md`](Rules.md) (no ceremonial `static_cast`).

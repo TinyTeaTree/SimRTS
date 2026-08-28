@@ -26,9 +26,12 @@ npm run server_build        # compile RTSServer/bin/rtsserver
 npm run server_local_host   # listen on 127.0.0.1:8080 (this computer only)
 npm run server_nat_host     # listen on 0.0.0.0:8080 (LAN); prints ip for other computers
 npm run server_shutdown     # free port 8080 (SIGTERM, then SIGKILL)
+npm run troubleshoot        # probe Networking.json host; on Mac, Local Network hints
 ```
 
 `server_local_host` and `server_nat_host` occupy the terminal. Use a second terminal for curl.
+
+`troubleshoot` POSTs `/Login` to the `ip`/`port` in `SimRTS/Content/Data/Networking.json`. On macOS 15+, Local Network permission cannot be read or turned on from a script. Terminal (npm) is usually exempt, so a successful probe does not mean Unreal Editor can connect. `npm run open` launches `UnrealEditor.app` directly; enable that app (and Epic Games Launcher if you open from there) in System Settings → Privacy & Security → Local Network. The script opens that pane unless you pass `--no-open`.
 
 `server_nat_host` binds every interface and prints the LAN IPv4 to put in the other machine's `Networking.json` (`ip` / `port` / `udp_port`). Same Wi-Fi or ethernet segment; not the public internet.
 
