@@ -29,7 +29,7 @@ Unreal game layer: display, input, HUD, UI, JSON I/O, bridge into the sim. Edito
 
 Deterministic tick sim. Same inputs + same tick → same `BattleState`.
 
-**Scope:** `SimRTS/Source/RTSEngine/`, `DeterministicMath/`, `tools/simrts_smoke_test.cpp`.
+**Scope:** `SimRTS/Source/RTSEngine/`, `DeterministicMath/`, `tools/simrts_smoke_test.cpp`. Hash recipe: [`Plans/gameplay_hash.plan.md`](Plans/gameplay_hash.plan.md).
 
 **Do:**
 
@@ -38,6 +38,7 @@ Deterministic tick sim. Same inputs + same tick → same `BattleState`.
 - Orders in, `StepForward` out. Pathfinding, sparse goals, idle push, and movement stay inside the engine.
 - Keep apply order: `ApplyOrders` → `AdvanceMovement` → `ApplyOrders` → `ApplyIdlePush` → `tick++`.
 - Prefer extending `Order` / `TickEngine` over leaking sim rules into Unreal.
+- When adding lockstep fields, extend `TickEngine::GameplayHash()` per [`Plans/gameplay_hash.plan.md`](Plans/gameplay_hash.plan.md).
 
 **Do not:** talk to RTSServer; include RTSComms; use platform `libm` for gameplay (sqrt/trig on lockstep state).
 
@@ -45,7 +46,7 @@ Deterministic tick sim. Same inputs + same tick → same `BattleState`.
 
 Vendor-agnostic matchmaking **client**. Talks HTTP to RTSServer. Not the sim, not Unreal UI.
 
-**Scope:** `SimRTS/Source/RTSComms/`. Protocol contract: [`Server.md`](Server.md). Plan: [`Plans/rtscomms.plan.md`](Plans/rtscomms.plan.md).
+**Scope:** `SimRTS/Source/RTSComms/`. Protocol contract: [`Server.md`](Server.md). Plans: [`Plans/rtscomms.plan.md`](Plans/rtscomms.plan.md), [`Plans/endian_independent.plan.md`](Plans/endian_independent.plan.md).
 
 **Do:**
 
@@ -53,6 +54,7 @@ Vendor-agnostic matchmaking **client**. Talks HTTP to RTSServer. Not the sim, no
 - Public API never blocks: `Login` / `GetRooms` / `CreateRoom` / `JoinRoom` / `LeaveRoom` enqueue and return. Completions via `TryPop` only. No callbacks from the I/O thread.
 - One I/O worker thread may block on HTTP. Session token, player id, and nickname live on `CommsClient` after Login. Join/Leave send room `id` only; the worker attaches `X-Session-Token`.
 - HTTP/1.0 over TCP plus UDP relay (Hello/Ack/Order) on a second port. Public API never blocks. Keep sync messages within one MTU.
+- UDP integers are little-endian via `Put`/`Read` shift-and-mask, never memcpy. Same for 16-, 32-, and 64-bit.
 
 **Do not:** pump `TryPop` inside RTSComms for Unreal; put lobby widgets here; change RTSServer unless the user asks both types.
 
@@ -65,6 +67,7 @@ Go matchmaking **host**. Discoverable process for login/rooms. Same binary later
 **Do:**
 
 - HTTP for login/rooms; UDP Hello seats a player and maps their address; UDP Order is rebroadcast to the room (including sender). In-memory sessions and rooms are fine; they vanish on process exit.
+- UDP integers are little-endian via `appendU32` / `readU32` shift-and-mask, never host `encoding/binary`. Same for 16- and 64-bit when those appear.
 - Keep the existing HTTP routes and auth: `POST /Login` (no token); all other HTTP calls require `X-Session-Token`. HTTP Join only authorizes; seating is UDP Hello. Leave uses the session’s `player_id` (do not take `player_id` in the body).
 - Preserve status codes: `401` bad/missing token, `404` missing room / not in room, `409` duplicate create.
 - `username` and room `id`: 1–64 letters, digits, `_`, or `-`.

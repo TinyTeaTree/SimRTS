@@ -85,4 +85,13 @@ void ASimRTSDebugHUD::DrawHUD()
 	}
 	Y += LineHeight;
 	DrawText(SelectionText, FLinearColor::White, X, Y, Font, Scale);
+	Y += LineHeight;
+	if (GameMode->IsDesynced())
+	{
+		DrawText(TEXT("Desynced"), FLinearColor::Red, X, Y, Font, Scale);
+	}
+	else
+	{
+		DrawText(TEXT("Synced"), FLinearColor::Green, X, Y, Font, Scale);
+	}
 }

@@ -32,6 +32,8 @@ struct CommsOrder {
 	int32_t sim_player_id = 0;
 	uint32_t order_id = 0;
 	int32_t actual_tick = 0;
+	int32_t hash_tick = 0;
+	uint64_t state_hash = 0;
 	std::vector<int32_t> unit_ids;
 	int32_t target_x = 0;
 	int32_t target_y = 0;

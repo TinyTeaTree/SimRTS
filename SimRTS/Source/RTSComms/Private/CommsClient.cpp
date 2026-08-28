@@ -336,6 +336,11 @@ void PutU32(std::vector<uint8_t>& out, uint32_t value) {
 	out.push_back(static_cast<uint8_t>(value >> 24));
 }
 
+void PutU64(std::vector<uint8_t>& out, uint64_t value) {
+	PutU32(out, static_cast<uint32_t>(value));
+	PutU32(out, static_cast<uint32_t>(value >> 32));
+}
+
 void PutU16(std::vector<uint8_t>& out, uint16_t value) {
 	out.push_back(static_cast<uint8_t>(value));
 	out.push_back(static_cast<uint8_t>(value >> 8));
@@ -407,6 +412,16 @@ bool ReadU32(const uint8_t* data, int size, int& off, uint32_t& out) {
 	return true;
 }
 
+bool ReadU64(const uint8_t* data, int size, int& off, uint64_t& out) {
+	uint32_t lo = 0;
+	uint32_t hi = 0;
+	if (!ReadU32(data, size, off, lo) || !ReadU32(data, size, off, hi)) {
+		return false;
+	}
+	out = static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
+	return true;
+}
+
 bool DecodeUdpHeader(
 	const uint8_t* data,
 	int size,
@@ -460,7 +475,13 @@ bool DecodeUdpOrderBody(const uint8_t* data, int size, int off, CommsOrder& orde
 	if (!ReadU32(data, size, off, order.order_id)) {
 		return false;
 	}
-	return ReadI32(data, size, off, order.actual_tick);
+	if (!ReadI32(data, size, off, order.actual_tick)) {
+		return false;
+	}
+	if (!ReadI32(data, size, off, order.hash_tick)) {
+		return false;
+	}
+	return ReadU64(data, size, off, order.state_hash);
 }
 
 bool EncodeUdpHello(const std::string& room_id, const std::string& player_id, const std::string& token, std::vector<uint8_t>& out) {
@@ -498,6 +519,8 @@ bool EncodeUdpOrder(
 	PutI32(out, order.sim_player_id);
 	PutU32(out, order.order_id);
 	PutI32(out, order.actual_tick);
+	PutI32(out, order.hash_tick);
+	PutU64(out, order.state_hash);
 	return out.size() <= kUdpMaxPacket;
 }
 

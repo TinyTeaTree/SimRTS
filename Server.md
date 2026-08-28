@@ -68,13 +68,13 @@ One server socket. Clients bind an ephemeral port and `sendto` the host.
 |---|---|
 | Hello | After HTTP Join. Body: room id, player id, session token. Server seats the player, maps the datagram address, Acks. |
 | Ack | Reply to Hello. Client treats Join as complete only after this. |
-| Order | Move command. Server rebroadcasts the same datagram to every seated member, including the sender. |
+| Order | Move command. Body includes sim ids, actual_tick, and a `(hash_tick, state_hash)` pair of committed BattleState. Server rebroadcasts the same datagram to every seated member, including the sender, and does not parse the body. |
 | Ping | After Join. Body: seq. Server echoes Pong to the sender only (not the room). |
 | Pong | Reply to Ping. Same seq. Client measures RTT on the I/O thread. |
 | Kickoff | After all seated players HTTP Start. Body: kickoff id, remaining_ms from first send. Repeated until KickoffAck from everyone or remaining hits 0. |
 | KickoffAck | Client reply to Kickoff. Server does not relay it. |
 
-Packets are binary, one datagram, max ~1200 bytes. Magic `RTS1`. Clients wait `max(0, remaining_ms - RTT/2)` then start the local sim timer. Repeats of the same kickoff id do not restart that wait.
+Packets are binary, one datagram, max ~1200 bytes. Magic `RTS1`. Multi-byte integers are **little-endian** (low byte first) via shift-and-mask; never memcpy a native `uint16`/`uint32`/`uint64`. Same rule for 16-, 32-, and 64-bit. See [`Plans/endian_independent.plan.md`](Plans/endian_independent.plan.md). Clients wait `max(0, remaining_ms - RTT/2)` then start the local sim timer. Repeats of the same kickoff id do not restart that wait.
 
 ## Curl tests
 

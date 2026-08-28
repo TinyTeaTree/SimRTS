@@ -31,6 +31,8 @@ bool USimRTSRoom::LoadDefault(ASimRTSGameMode& GameMode)
 
 	bLoaded = true;
 
+	GameMode.RecordGameplayHash();
+
 	UE_LOG(LogTemp, Log, TEXT("SimRTS Room loaded. Units=%d GridScale=%.1f EngineTicksPerSecond=%d (waiting for kickoff)"),
 		static_cast<int32>(Bridge.GetState().units.size()),
 		GameMode.GetGridScale(),
@@ -131,6 +133,10 @@ void USimRTSRoom::OnSimTick()
 
 	ASimRTSGameMode* GameMode = Cast<ASimRTSGameMode>(GetOuter());
 	Bridge.StepForward();
+	if (GameMode != nullptr)
+	{
+		GameMode->RecordGameplayHash();
+	}
 
 	if (GameMode != nullptr && UnitViewManager != nullptr)
 	{

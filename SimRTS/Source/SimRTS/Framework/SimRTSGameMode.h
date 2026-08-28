@@ -66,6 +66,9 @@ public:
 	bool IsSimTickHalted() const;
 	int32 GetSimTicksBehind() const;
 	int32 GetActualTick() const;
+	bool IsDesynced() const;
+
+	void RecordGameplayHash();
 
 	FOnSimRTSCommsEvent OnCommsEvent;
 
@@ -107,6 +110,9 @@ private:
 	void MaybePollRooms(float DeltaSeconds);
 	void HandleKickoff(uint32 KickoffId, int32 RemainingMs);
 	void ArmSimClock();
+	void ResetHashHistory();
+	void ComparePeerHash(int32 HashTick, uint64 StateHash);
+	bool TryGetLocalHash(int32 Tick, uint64& OutHash) const;
 	FSimRTSCommsEventView MakeCommsView(const SimRTS::CommsEvent& Event) const;
 
 	UFUNCTION()
@@ -120,6 +126,9 @@ private:
 	float MinTickDelaySeconds = 0.01f;
 	uint32 NextOrderId = 1;
 	FString JoinedMatchmakingRoomId;
+	bool bDesynced = false;
+	TArray<TPair<int32, uint64>> LocalHashes;
+	TArray<TPair<int32, uint64>> PendingRemoteHashes;
 	bool bMatchmakingMenuOpen = false;
 	bool bUserRequestPending = false;
 	bool bKickoffArmed = false;

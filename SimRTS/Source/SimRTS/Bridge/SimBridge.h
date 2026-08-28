@@ -29,6 +29,7 @@ public:
 	void StepForward();
 
 	int32 GetTick() const;
+	uint64 GetGameplayHash() const;
 	const SimRTS::BattleState& GetState() const;
 	const SimRTS::StaticBattleData& GetStaticData() const;
 

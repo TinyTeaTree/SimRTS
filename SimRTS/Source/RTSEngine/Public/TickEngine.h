@@ -27,6 +27,7 @@ public:
     void StepForward();
 
     Tick GetTick() const { return tick_; }
+    uint64_t GameplayHash() const;
     const StaticBattleData& GetStaticData() const { return static_data_; }
     const BattleState& GetState() const { return state_; }
 

@@ -467,6 +467,34 @@ int main() {
         }
     }
 
+    {
+        TickEngine hash_a;
+        TickEngine hash_b;
+        Level hash_level = MakeSmokeLevel();
+        hash_a.LoadLevel(hash_level);
+        hash_b.LoadLevel(hash_level);
+        if (hash_a.GameplayHash() != hash_b.GameplayHash()) {
+            Fail("identical loads should share a gameplay hash");
+        }
+        Order move;
+        move.player_id = 1;
+        move.unit_ids = {1};
+        move.target = {20, 10};
+        hash_a.SubmitOrder(move);
+        hash_a.StepForward();
+        hash_b.StepForward();
+        if (hash_a.GameplayHash() == hash_b.GameplayHash()) {
+            Fail("an extra SubmitOrder should change the gameplay hash");
+        }
+        TickEngine hash_c;
+        hash_c.LoadLevel(hash_level);
+        hash_c.SubmitOrder(move);
+        hash_c.StepForward();
+        if (hash_a.GameplayHash() != hash_c.GameplayHash()) {
+            Fail("same inputs should share a gameplay hash");
+        }
+    }
+
     std::printf("OK: line-move + is_next + pathfinding smoke test passed (tick=%d, pos=%d,%d)\n",
                 path_engine.GetTick(),
                 path_engine.FindUnit(1)->position.x,

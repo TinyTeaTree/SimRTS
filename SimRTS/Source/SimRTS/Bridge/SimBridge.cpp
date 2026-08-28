@@ -102,6 +102,11 @@ int32 FSimBridge::GetTick() const
 	return Engine.GetTick();
 }
 
+uint64 FSimBridge::GetGameplayHash() const
+{
+	return Engine.GameplayHash();
+}
+
 const SimRTS::BattleState& FSimBridge::GetState() const
 {
 	return Engine.GetState();

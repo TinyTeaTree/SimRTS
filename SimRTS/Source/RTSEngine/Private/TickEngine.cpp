@@ -500,6 +500,73 @@ void TickEngine::StepForward() {
     ++tick_;
 }
 
+uint64_t TickEngine::GameplayHash() const {
+    uint64_t hash = 14695981039346656037ull;
+    const auto mix8 = [&](uint8_t value) {
+        hash ^= value;
+        hash *= 1099511628211ull;
+    };
+    const auto mix32 = [&](uint32_t value) {
+        mix8(value);
+        mix8(value >> 8);
+        mix8(value >> 16);
+        mix8(value >> 24);
+    };
+    const auto mix_i32 = [&](int32_t value) {
+        mix32(static_cast<uint32_t>(value));
+    };
+    const auto mix64 = [&](uint64_t value) {
+        mix8(value);
+        mix8(value >> 8);
+        mix8(value >> 16);
+        mix8(value >> 24);
+        mix8(value >> 32);
+        mix8(value >> 40);
+        mix8(value >> 48);
+        mix8(value >> 56);
+    };
+
+    std::vector<const Unit*> units;
+    units.reserve(state_.units.size());
+    for (const Unit& unit : state_.units) {
+        units.push_back(&unit);
+    }
+    std::sort(units.begin(), units.end(), [](const Unit* a, const Unit* b) {
+        return a->id < b->id;
+    });
+
+    mix32(static_cast<uint32_t>(units.size()));
+    for (const Unit* unit : units) {
+        mix_i32(unit->id);
+        mix8(static_cast<uint8_t>(unit->type));
+        mix_i32(unit->position.x);
+        mix_i32(unit->position.y);
+        mix8(unit->move.active ? 1 : 0);
+        mix_i32(unit->move.start.x);
+        mix_i32(unit->move.start.y);
+        mix_i32(unit->move.end.x);
+        mix_i32(unit->move.end.y);
+        mix_i32(unit->move.start_tick);
+        mix64(static_cast<uint64_t>(unit->move.length_fp));
+        mix_i32(unit->push_pressure_x);
+        mix_i32(unit->push_pressure_y);
+    }
+
+    mix32(static_cast<uint32_t>(state_.orders.size()));
+    for (const Order& order : state_.orders) {
+        mix_i32(order.player_id);
+        mix32(static_cast<uint32_t>(order.unit_ids.size()));
+        for (UnitId id : order.unit_ids) {
+            mix_i32(id);
+        }
+        mix8(static_cast<uint8_t>(order.type));
+        mix_i32(order.target.x);
+        mix_i32(order.target.y);
+        mix8(order.is_next ? 1 : 0);
+    }
+    return hash;
+}
+
 const Unit* TickEngine::FindUnit(UnitId id) const {
     for (const Unit& unit : state_.units) {
         if (unit.id == id) {

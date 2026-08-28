@@ -55,12 +55,16 @@ void RelayMoveOrder(
 	int32 TargetY,
 	bool bIsNext,
 	uint32 OrderId,
-	int32 ActualTick)
+	int32 ActualTick,
+	int32 HashTick,
+	uint64 StateHash)
 {
 	SimRTS::CommsOrder Order;
 	Order.sim_player_id = SimPlayerIdFromLogin(Comms.PlayerId());
 	Order.order_id = OrderId;
 	Order.actual_tick = ActualTick;
+	Order.hash_tick = HashTick;
+	Order.state_hash = StateHash;
 	Order.target_x = TargetX;
 	Order.target_y = TargetY;
 	Order.type = 0;
@@ -146,6 +150,7 @@ void ASimRTSGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		Room->Stop(*this);
 	}
+	ResetHashHistory();
 	DestroyDebugVisualizers();
 
 	Super::EndPlay(EndPlayReason);
@@ -253,7 +258,14 @@ void ASimRTSGameMode::SubmitMoveOrder(const TArray<int32>& UnitIds, int32 Target
 	}
 
 	const uint32 OrderId = NextOrderId++;
-	RelayMoveOrder(Comms, UnitIds, TargetX, TargetY, bIsNext, OrderId, GetActualTick());
+	int32 HashTick = 0;
+	uint64 StateHash = 0;
+	if (LocalHashes.Num() > 0)
+	{
+		HashTick = LocalHashes.Last().Key;
+		StateHash = LocalHashes.Last().Value;
+	}
+	RelayMoveOrder(Comms, UnitIds, TargetX, TargetY, bIsNext, OrderId, GetActualTick(), HashTick, StateHash);
 }
 
 bool ASimRTSGameMode::IsMatchmakingLoggedIn() const
@@ -297,6 +309,106 @@ int32 ASimRTSGameMode::GetSimTicksBehind() const
 int32 ASimRTSGameMode::GetActualTick() const
 {
 	return Room != nullptr ? Room->GetActualTick() : 0;
+}
+
+bool ASimRTSGameMode::IsDesynced() const
+{
+	return bDesynced;
+}
+
+void ASimRTSGameMode::ResetHashHistory()
+{
+	LocalHashes.Reset();
+	PendingRemoteHashes.Reset();
+	bDesynced = false;
+}
+
+bool ASimRTSGameMode::TryGetLocalHash(int32 Tick, uint64& OutHash) const
+{
+	for (int32 Index = LocalHashes.Num() - 1; Index >= 0; --Index)
+	{
+		if (LocalHashes[Index].Key == Tick)
+		{
+			OutHash = LocalHashes[Index].Value;
+			return true;
+		}
+	}
+	return false;
+}
+
+void ASimRTSGameMode::ComparePeerHash(int32 HashTick, uint64 StateHash)
+{
+	if (bDesynced)
+	{
+		return;
+	}
+
+	uint64 LocalHash = 0;
+	if (TryGetLocalHash(HashTick, LocalHash))
+	{
+		if (LocalHash != StateHash)
+		{
+			bDesynced = true;
+			UE_LOG(LogTemp, Error, TEXT("SimRTS desync hash_tick=%d local=%llu peer=%llu"),
+				HashTick,
+				static_cast<unsigned long long>(LocalHash),
+				static_cast<unsigned long long>(StateHash));
+		}
+		return;
+	}
+
+	if (LocalHashes.Num() > 0 && HashTick < LocalHashes[0].Key)
+	{
+		return;
+	}
+
+	PendingRemoteHashes.Add({HashTick, StateHash});
+}
+
+void ASimRTSGameMode::RecordGameplayHash()
+{
+	if (!IsRoomLoaded())
+	{
+		return;
+	}
+
+	const int32 Tick = GetBridge().GetTick();
+	const uint64 Hash = GetBridge().GetGameplayHash();
+	if (LocalHashes.Num() == 0 || LocalHashes.Last().Key != Tick)
+	{
+		LocalHashes.Add({Tick, Hash});
+		while (LocalHashes.Num() > 600)
+		{
+			LocalHashes.RemoveAt(0);
+		}
+	}
+	else
+	{
+		LocalHashes.Last().Value = Hash;
+	}
+
+	for (int32 Index = PendingRemoteHashes.Num() - 1; Index >= 0; --Index)
+	{
+		const int32 RemoteTick = PendingRemoteHashes[Index].Key;
+		const uint64 RemoteHash = PendingRemoteHashes[Index].Value;
+		uint64 LocalHash = 0;
+		if (TryGetLocalHash(RemoteTick, LocalHash))
+		{
+			PendingRemoteHashes.RemoveAt(Index);
+			if (LocalHash != RemoteHash)
+			{
+				bDesynced = true;
+				UE_LOG(LogTemp, Error, TEXT("SimRTS desync hash_tick=%d local=%llu peer=%llu"),
+					RemoteTick,
+					static_cast<unsigned long long>(LocalHash),
+					static_cast<unsigned long long>(RemoteHash));
+			}
+		}
+		else if (LocalHashes.Num() > 0 && RemoteTick < LocalHashes[0].Key)
+		{
+			PendingRemoteHashes.RemoveAt(Index);
+		}
+	}
 }
 
 void ASimRTSGameMode::HandleKickoff(uint32 KickoffId, int32 RemainingMs)
@@ -399,6 +511,11 @@ void ASimRTSGameMode::PumpComms()
 					Event.result.order.sim_player_id,
 					Event.result.order.order_id,
 					ScheduledTick);
+				const int32 LocalPlayer = SimPlayerIdFromLogin(Comms.PlayerId());
+				if (Event.result.order.sim_player_id != LocalPlayer)
+				{
+					ComparePeerHash(Event.result.order.hash_tick, Event.result.order.state_hash);
+				}
 			}
 			continue;
 		}
@@ -424,6 +541,7 @@ void ASimRTSGameMode::PumpComms()
 		else if (Event.kind == SimRTS::CommsEventKind::LeaveRoom && Event.result.ok)
 		{
 			JoinedMatchmakingRoomId.Empty();
+			ResetHashHistory();
 			bKickoffArmed = false;
 			PendingKickoffRemainingMs = -1;
 			PendingKickoffId = 0;
