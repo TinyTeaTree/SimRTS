@@ -6,6 +6,7 @@
     "compile_open": "node tools/compile.js -open",
     "compile:hot": "node tools/compile.js --hot",
     "open": "node tools/open.js",
+    "troubleshoot": "node tools/troubleshoot.js",
     "server_build": "node tools/rtsserver.js build",
     "server_local_host": "node tools/rtsserver.js local",
     "server_nat_host": "node tools/rtsserver.js nat",
