@@ -43,7 +43,7 @@ public:
 
 private:
 	void OnSimTick();
-	void ScheduleNextAttempt(ASimRTSGameMode& GameMode);
+	void ScheduleNextAttempt(ASimRTSGameMode& GameMode, bool bLocked = false);
 	double ComputeWaitSeconds(double MinTickDelaySeconds) const;
 
 	FSimBridge Bridge;

@@ -132,6 +132,15 @@ void USimRTSRoom::OnSimTick()
 	}
 
 	ASimRTSGameMode* GameMode = Cast<ASimRTSGameMode>(GetOuter());
+	if (GameMode != nullptr && !GameMode->HasAllCommandsForSimTick())
+	{
+		if (bClockStarted && !bTickHalted)
+		{
+			ScheduleNextAttempt(*GameMode, true);
+		}
+		return;
+	}
+
 	Bridge.StepForward();
 	if (GameMode != nullptr)
 	{
@@ -149,7 +158,7 @@ void USimRTSRoom::OnSimTick()
 	}
 }
 
-void USimRTSRoom::ScheduleNextAttempt(ASimRTSGameMode& GameMode)
+void USimRTSRoom::ScheduleNextAttempt(ASimRTSGameMode& GameMode, bool bLocked)
 {
 	UWorld* World = GameMode.GetWorld();
 	if (World == nullptr)
@@ -157,7 +166,9 @@ void USimRTSRoom::ScheduleNextAttempt(ASimRTSGameMode& GameMode)
 		return;
 	}
 
-	const float Wait = ComputeWaitSeconds(GameMode.GetMinTickDelaySeconds());
+	const float Wait = bLocked
+		? GameMode.GetMinTickDelaySeconds()
+		: ComputeWaitSeconds(GameMode.GetMinTickDelaySeconds());
 	World->GetTimerManager().SetTimer(
 		SimTimerHandle,
 		this,

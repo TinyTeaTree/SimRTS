@@ -62,6 +62,11 @@ void ASimRTSDebugHUD::DrawHUD()
 			DrawText(TEXT("Halted"), FLinearColor::Yellow, X, Y, Font, Scale);
 			Y += LineHeight;
 		}
+		else if (GameMode->IsSimLocked())
+		{
+			DrawText(TEXT("Locked"), FLinearColor::Red, X, Y, Font, Scale);
+			Y += LineHeight;
+		}
 		else
 		{
 			const int32 Behind = GameMode->GetSimTicksBehind();

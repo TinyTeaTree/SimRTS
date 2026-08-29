@@ -67,6 +67,9 @@ public:
 	int32 GetSimTicksBehind() const;
 	int32 GetActualTick() const;
 	bool IsDesynced() const;
+	bool IsSimLocked() const;
+	bool HasAllCommandsForSimTick() const;
+	const TArray<int32>& GetSeatedSimPlayerIds() const { return SeatedSimPlayerIds; }
 
 	void RecordGameplayHash();
 
@@ -108,9 +111,14 @@ private:
 	void DestroyDebugVisualizers();
 	void PumpComms();
 	void MaybePollRooms(float DeltaSeconds);
+	void MaybeSendEmptyOrders();
 	void HandleKickoff(uint32 KickoffId, int32 RemainingMs);
 	void ArmSimClock();
 	void ResetHashHistory();
+	void SnapshotSeatedPlayers(const std::vector<std::string>& PlayerIds);
+	void NoteCommandFrame(int32 SimPlayerId, int32 ActualTick);
+	void PruneCommandFrames();
+	void LatestOrderHash(int32& OutHashTick, uint64& OutStateHash) const;
 	void ComparePeerHash(int32 HashTick, uint64 StateHash);
 	bool TryGetLocalHash(int32 Tick, uint64& OutHash) const;
 	FSimRTSCommsEventView MakeCommsView(const SimRTS::CommsEvent& Event) const;
@@ -125,6 +133,10 @@ private:
 	int32 FutureTickDistance = 5;
 	float MinTickDelaySeconds = 0.01f;
 	uint32 NextOrderId = 1;
+	int32 LastCoveredActualTick = -1;
+	TSet<int32> ActualTicksWithClicks;
+	TArray<int32> SeatedSimPlayerIds;
+	TMap<int32, TSet<int32>> CommandFramesByPlayer;
 	FString JoinedMatchmakingRoomId;
 	bool bDesynced = false;
 	TArray<TPair<int32, uint64>> LocalHashes;

@@ -61,7 +61,7 @@ X-Session-Token: <session_token>
 | POST | `/LeaveRoom` | token | `{"id":"alpha"}` |
 | POST | `/StartRoom` | token | `{"id":"alpha"}` |
 
-Login returns `{ "session_token", "player_id", "nickname" }` (`nickname` = username). Each login is a new anonymous player. HTTP Join does not add the player to `player_ids`. `StartRoom` marks the session player ready; 404 if they are not seated (UDP Hello). Duplicate Start is 200. When every seated player has started, the server broadcasts UDP Kickoff. Duplicate create → `409`. Missing room or player not in room → `404`. Missing/bad token → `401`.
+Login returns `{ "session_token", "player_id", "nickname" }` (`nickname` = username). Each login is a new anonymous player. HTTP Join does not add the player to `player_ids`. `StartRoom` marks the session player ready; 404 if they are not seated (UDP Hello). Duplicate Start is 200. The response is the room `{ "id", "player_ids" }` of everyone seated at that call. When every seated player has started, the server broadcasts UDP Kickoff. Duplicate create → `409`. Missing room or player not in room → `404`. Missing/bad token → `401`.
 
 ## UDP relay (`:8081`)
 
