@@ -54,7 +54,7 @@ Vendor-agnostic matchmaking **client**. Talks HTTP to RTSServer. Not the sim, no
 - Pure C++ (STL + private TCP shim in `CommsSockets.h` only). No Unreal HTTP/Json, no `UObject`.
 - Public API never blocks: `Login` / `GetRooms` / `CreateRoom` / `JoinRoom` / `LeaveRoom` enqueue and return. Completions via `TryPop` only. No callbacks from the I/O thread.
 - One I/O worker thread may block on HTTP. Session token, player id, and nickname live on `CommsClient` after Login. Join/Leave send room `id` only; the worker attaches `X-Session-Token`.
-- HTTP/1.0 over TCP plus UDP relay (Hello/Ack/Order) on a second port. Public API never blocks. Keep sync messages within one MTU.
+- HTTP/1.0 over TCP plus UDP relay (Hello/Ack/Order) on a second port. Public API never blocks. Keep sync messages within one MTU. Packet inventory: [`Plans/udp_packets.plan.md`](Plans/udp_packets.plan.md).
 - UDP integers are little-endian via `Put`/`Read` shift-and-mask, never memcpy. Same for 16-, 32-, and 64-bit.
 
 **Do not:** pump `TryPop` inside RTSComms for Unreal; put lobby widgets here; change RTSServer unless the user asks both types.

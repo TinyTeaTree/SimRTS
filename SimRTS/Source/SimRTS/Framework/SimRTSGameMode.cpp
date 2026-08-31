@@ -267,8 +267,10 @@ void ASimRTSGameMode::SubmitMoveOrder(const TArray<int32>& UnitIds, int32 Target
 	int32 HashTick = 0;
 	uint64 StateHash = 0;
 	LatestOrderHash(HashTick, StateHash);
-	RelayMoveOrder(Comms, UnitIds, TargetX, TargetY, bIsNext, NextOrderId++, ActualTick, HashTick, StateHash);
-	NoteCommandFrame(SimPlayerIdFromLogin(Comms.PlayerId()), ActualTick);
+	const uint32 OrderId = NextOrderId++;
+	LastClickOrderId = OrderId;
+	RelayMoveOrder(Comms, UnitIds, TargetX, TargetY, bIsNext, OrderId, ActualTick, HashTick, StateHash);
+	NoteCommandFrame(SimPlayerIdFromLogin(Comms.PlayerId()), ActualTick, OrderId, true);
 }
 
 bool ASimRTSGameMode::IsMatchmakingLoggedIn() const
@@ -328,6 +330,9 @@ void ASimRTSGameMode::ResetHashHistory()
 	ActualTicksWithClicks.Reset();
 	SeatedSimPlayerIds.Reset();
 	CommandFramesByPlayer.Reset();
+	LockTrackByPlayer.Reset();
+	LastClickOrderId = 0;
+	NextOrderId = 1;
 }
 
 void ASimRTSGameMode::SnapshotSeatedPlayers(const std::vector<std::string>& PlayerIds)
@@ -342,9 +347,58 @@ void ASimRTSGameMode::SnapshotSeatedPlayers(const std::vector<std::string>& Play
 	UE_LOG(LogTemp, Log, TEXT("SimRTS seated set count=%d"), SeatedSimPlayerIds.Num());
 }
 
-void ASimRTSGameMode::NoteCommandFrame(int32 SimPlayerId, int32 ActualTick)
+void ASimRTSGameMode::NoteCommandFrame(int32 SimPlayerId, int32 ActualTick, uint32 OrderId, bool bClick)
 {
 	CommandFramesByPlayer.FindOrAdd(SimPlayerId).Add(ActualTick);
+	FSimRTSLockTrack& Track = LockTrackByPlayer.FindOrAdd(SimPlayerId);
+	FSimRTSRetroFrame Frame;
+	Frame.ActualTick = ActualTick;
+	Frame.OrderId = OrderId;
+	Frame.bClick = bClick;
+	Track.Bag.Add(Frame);
+	ApplyRetroactiveEmpties(SimPlayerId);
+}
+
+void ASimRTSGameMode::ApplyRetroactiveEmpties(int32 SimPlayerId)
+{
+	FSimRTSLockTrack* Track = LockTrackByPlayer.Find(SimPlayerId);
+	TSet<int32>* Frames = CommandFramesByPlayer.Find(SimPlayerId);
+	if (Track == nullptr || Frames == nullptr)
+	{
+		return;
+	}
+
+	const auto FillUntil = [Frames](int32 LastClickAT, int32 ThisAT)
+	{
+		for (int32 At = LastClickAT + 1; At < ThisAT; ++At)
+		{
+			Frames->Add(At);
+		}
+	};
+
+	bool bAdvanced = true;
+	while (bAdvanced)
+	{
+		bAdvanced = false;
+		for (const FSimRTSRetroFrame& Packet : Track->Bag)
+		{
+			if (Packet.bClick && Packet.OrderId == Track->LastClickOrderId + 1)
+			{
+				FillUntil(Track->LastClickAT, Packet.ActualTick);
+				Track->LastClickAT = Packet.ActualTick;
+				Track->LastClickOrderId = Packet.OrderId;
+				bAdvanced = true;
+			}
+		}
+	}
+
+	for (const FSimRTSRetroFrame& Packet : Track->Bag)
+	{
+		if (!Packet.bClick && Packet.OrderId == Track->LastClickOrderId)
+		{
+			FillUntil(Track->LastClickAT, Packet.ActualTick);
+		}
+	}
 }
 
 void ASimRTSGameMode::PruneCommandFrames()
@@ -370,6 +424,14 @@ void ASimRTSGameMode::PruneCommandFrames()
 				It.RemoveCurrent();
 			}
 		}
+	}
+
+	for (TPair<int32, FSimRTSLockTrack>& Pair : LockTrackByPlayer)
+	{
+		Pair.Value.Bag.RemoveAll([KeepFrom](const FSimRTSRetroFrame& Frame)
+		{
+			return Frame.ActualTick < KeepFrom;
+		});
 	}
 }
 
@@ -401,6 +463,26 @@ bool ASimRTSGameMode::HasAllCommandsForSimTick() const
 bool ASimRTSGameMode::IsSimLocked() const
 {
 	return IsSimClockStarted() && !HasAllCommandsForSimTick();
+}
+
+void ASimRTSGameMode::LogTmpSimLock() const
+{
+	const int32 Tick = IsRoomLoaded() ? GetBridge().GetTick() : -1;
+	const int32 NeededActualTick = Tick >= FutureTickDistance ? Tick - FutureTickDistance : -1;
+	FString Missing;
+	for (const int32 PlayerId : SeatedSimPlayerIds)
+	{
+		const TSet<int32>* Frames = CommandFramesByPlayer.Find(PlayerId);
+		const bool bHave = Frames != nullptr && NeededActualTick >= 0 && Frames->Contains(NeededActualTick);
+		Missing += FString::Printf(TEXT(" p=%d have=%d"), PlayerId, bHave ? 1 : 0);
+	}
+	UE_LOG(LogTemp, Warning, TEXT("SimRTS lock gettick=%d at=%d need_at=%d ftd=%d seated=%d%s"),
+		Tick,
+		GetActualTick(),
+		NeededActualTick,
+		FutureTickDistance,
+		SeatedSimPlayerIds.Num(),
+		*Missing);
 }
 
 void ASimRTSGameMode::LatestOrderHash(int32& OutHashTick, uint64& OutStateHash) const
@@ -440,8 +522,8 @@ void ASimRTSGameMode::MaybeSendEmptyOrders()
 			continue;
 		}
 
-		RelayMoveOrder(Comms, TArray<int32>(), 0, 0, false, NextOrderId++, At, HashTick, StateHash);
-		NoteCommandFrame(SimPlayerIdFromLogin(Comms.PlayerId()), At);
+		RelayMoveOrder(Comms, TArray<int32>(), 0, 0, false, LastClickOrderId, At, HashTick, StateHash);
+		NoteCommandFrame(SimPlayerIdFromLogin(Comms.PlayerId()), At, LastClickOrderId, false);
 		LastCoveredActualTick = At;
 	}
 }
@@ -619,7 +701,26 @@ void ASimRTSGameMode::PumpComms()
 				{
 					UnitIds.Add(Id);
 				}
-				NoteCommandFrame(Event.result.order.sim_player_id, Event.result.order.actual_tick);
+				NoteCommandFrame(
+					Event.result.order.sim_player_id,
+					Event.result.order.actual_tick,
+					Event.result.order.order_id,
+					UnitIds.Num() > 0);
+				{
+					const int32 Tick = GetBridge().GetTick();
+					const int32 NeededActualTick = Tick >= FutureTickDistance ? Tick - FutureTickDistance : -1;
+					const int32 LocalPlayer = SimPlayerIdFromLogin(Comms.PlayerId());
+					UE_LOG(LogTemp, Warning, TEXT("SimRTS recv gettick=%d at=%d order=%u player=%d actual=%d units=%d need_at=%d local=%d have=%d"),
+						Tick,
+						GetActualTick(),
+						Event.result.order.order_id,
+						Event.result.order.sim_player_id,
+						Event.result.order.actual_tick,
+						UnitIds.Num(),
+						NeededActualTick,
+						Event.result.order.sim_player_id == LocalPlayer ? 1 : 0,
+						HasAllCommandsForSimTick() ? 1 : 0);
+				}
 				if (UnitIds.Num() > 0)
 				{
 					const int32 ScheduledTick = Event.result.order.actual_tick + FutureTickDistance;

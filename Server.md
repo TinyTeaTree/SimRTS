@@ -77,7 +77,7 @@ One server socket. Clients bind an ephemeral port and `sendto` the host.
 | Kickoff | After all seated players HTTP Start. Body: kickoff id, remaining_ms from first send. Repeated until KickoffAck from everyone or remaining hits 0. |
 | KickoffAck | Client reply to Kickoff. Server does not relay it. |
 
-Packets are binary, one datagram, max ~1200 bytes. Magic `RTS1`. Multi-byte integers are **little-endian** (low byte first) via shift-and-mask; never memcpy a native `uint16`/`uint32`/`uint64`. Same rule for 16-, 32-, and 64-bit. See [`Plans/endian_independent.plan.md`](Plans/endian_independent.plan.md). Clients wait `max(0, remaining_ms - RTT/2)` then start the local sim timer. Repeats of the same kickoff id do not restart that wait.
+Packets are binary, one datagram, max ~1200 bytes. Magic `RTS1`. Multi-byte integers are **little-endian** (low byte first) via shift-and-mask; never memcpy a native `uint16`/`uint32`/`uint64`. Same rule for 16-, 32-, and 64-bit. See [`Plans/endian_independent.plan.md`](Plans/endian_independent.plan.md). Field order and leftover bytes per kind: [`Plans/udp_packets.plan.md`](Plans/udp_packets.plan.md). Clients wait `max(0, remaining_ms - RTT/2)` then start the local sim timer. Repeats of the same kickoff id do not restart that wait.
 
 ## Curl tests
 

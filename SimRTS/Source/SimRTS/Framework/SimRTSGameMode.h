@@ -14,6 +14,20 @@ class ASimRTSPathVisualizer;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnSimRTSCommsEvent, const FSimRTSCommsEventView&);
 
+struct FSimRTSRetroFrame
+{
+	int32 ActualTick = 0;
+	uint32 OrderId = 0;
+	bool bClick = false;
+};
+
+struct FSimRTSLockTrack
+{
+	int32 LastClickAT = -1;
+	uint32 LastClickOrderId = 0;
+	TArray<FSimRTSRetroFrame> Bag;
+};
+
 UCLASS()
 class SIMRTS_API ASimRTSGameMode : public AGameModeBase
 {
@@ -69,6 +83,7 @@ public:
 	bool IsDesynced() const;
 	bool IsSimLocked() const;
 	bool HasAllCommandsForSimTick() const;
+	void LogTmpSimLock() const;
 	const TArray<int32>& GetSeatedSimPlayerIds() const { return SeatedSimPlayerIds; }
 
 	void RecordGameplayHash();
@@ -116,7 +131,8 @@ private:
 	void ArmSimClock();
 	void ResetHashHistory();
 	void SnapshotSeatedPlayers(const std::vector<std::string>& PlayerIds);
-	void NoteCommandFrame(int32 SimPlayerId, int32 ActualTick);
+	void NoteCommandFrame(int32 SimPlayerId, int32 ActualTick, uint32 OrderId, bool bClick);
+	void ApplyRetroactiveEmpties(int32 SimPlayerId);
 	void PruneCommandFrames();
 	void LatestOrderHash(int32& OutHashTick, uint64& OutStateHash) const;
 	void ComparePeerHash(int32 HashTick, uint64 StateHash);
@@ -133,10 +149,12 @@ private:
 	int32 FutureTickDistance = 5;
 	float MinTickDelaySeconds = 0.01f;
 	uint32 NextOrderId = 1;
+	uint32 LastClickOrderId = 0;
 	int32 LastCoveredActualTick = -1;
 	TSet<int32> ActualTicksWithClicks;
 	TArray<int32> SeatedSimPlayerIds;
 	TMap<int32, TSet<int32>> CommandFramesByPlayer;
+	TMap<int32, FSimRTSLockTrack> LockTrackByPlayer;
 	FString JoinedMatchmakingRoomId;
 	bool bDesynced = false;
 	TArray<TPair<int32, uint64>> LocalHashes;

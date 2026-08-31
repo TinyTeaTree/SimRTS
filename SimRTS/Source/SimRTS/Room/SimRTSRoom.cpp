@@ -134,6 +134,7 @@ void USimRTSRoom::OnSimTick()
 	ASimRTSGameMode* GameMode = Cast<ASimRTSGameMode>(GetOuter());
 	if (GameMode != nullptr && !GameMode->HasAllCommandsForSimTick())
 	{
+		GameMode->LogTmpSimLock();
 		if (bClockStarted && !bTickHalted)
 		{
 			ScheduleNextAttempt(*GameMode, true);
