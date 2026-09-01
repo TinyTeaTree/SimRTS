@@ -26,16 +26,10 @@ struct CommsSession {
 struct CommsRoom {
 	std::string id;
 	std::vector<std::string> player_ids;
-	std::vector<uint8_t> seats;
-};
-
-struct CommsAckEntry {
-	uint8_t seat = 0;
-	uint32_t last_click_order_id = 0;
 };
 
 struct CommsOrder {
-	uint8_t seat = 0;
+	int32_t sim_player_id = 0;
 	uint32_t order_id = 0;
 	int32_t actual_tick = 0;
 	int32_t hash_tick = 0;
@@ -45,9 +39,6 @@ struct CommsOrder {
 	int32_t target_y = 0;
 	uint8_t type = 0;
 	bool is_next = false;
-	std::vector<CommsAckEntry> acks;
-	std::vector<CommsAckEntry> watermarks;
-	std::vector<CommsOrder> piggybacks;
 };
 
 struct CommsKickoff {

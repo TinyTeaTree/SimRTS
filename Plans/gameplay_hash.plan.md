@@ -54,7 +54,7 @@ Units **sorted by `id`** (vector order is not the contract). Mix `uint32` count,
 
 Then live `orders` in **vector order** (queue order is gameplay). Mix `uint32` count, then each order:
 
-- `player_id` (`uint8_t` seat)
+- `player_id`
 - `unit_ids` count, then each id
 - `type`, `target.x/y`, `is_next`
 

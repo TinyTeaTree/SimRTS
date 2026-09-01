@@ -105,55 +105,6 @@ bool JsonStringArrayField(const std::string& json, size_t start, size_t end, con
 	return false;
 }
 
-bool ParseJsonUint8(const std::string& s, size_t& i, uint8_t& out) {
-	i = SkipWs(s, i);
-	if (i >= s.size() || s[i] < '0' || s[i] > '9') {
-		return false;
-	}
-	unsigned value = 0;
-	while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
-		value = value * 10u + static_cast<unsigned>(s[i] - '0');
-		if (value > 255u) {
-			return false;
-		}
-		++i;
-	}
-	out = static_cast<uint8_t>(value);
-	return true;
-}
-
-bool JsonU8ArrayField(const std::string& json, size_t start, size_t end, const char* key, std::vector<uint8_t>& out) {
-	size_t v = 0;
-	if (!FindKeyValue(json, key, start, end, v)) {
-		return false;
-	}
-	v = SkipWs(json, v);
-	if (v >= end || json[v] != '[') {
-		return false;
-	}
-	++v;
-	out.clear();
-	while (v < end) {
-		v = SkipWs(json, v);
-		if (v >= end) {
-			return false;
-		}
-		if (json[v] == ']') {
-			return true;
-		}
-		if (json[v] == ',') {
-			++v;
-			continue;
-		}
-		uint8_t item = 0;
-		if (!ParseJsonUint8(json, v, item)) {
-			return false;
-		}
-		out.push_back(item);
-	}
-	return false;
-}
-
 size_t ObjectEnd(const std::string& json, size_t open_brace) {
 	int depth = 0;
 	for (size_t i = open_brace; i < json.size(); ++i) {
@@ -175,7 +126,6 @@ bool ParseRoomObject(const std::string& json, size_t start, size_t end, CommsRoo
 		return false;
 	}
 	JsonStringArrayField(json, start, end, "player_ids", room.player_ids);
-	JsonU8ArrayField(json, start, end, "seats", room.seats);
 	return true;
 }
 
@@ -494,56 +444,7 @@ bool DecodeUdpHeader(
 	return true;
 }
 
-bool PutAckEntries(std::vector<uint8_t>& out, const std::vector<CommsAckEntry>& entries) {
-	if (entries.size() > 255) {
-		return false;
-	}
-	PutU8(out, static_cast<uint8_t>(entries.size()));
-	for (const CommsAckEntry& entry : entries) {
-		PutU8(out, entry.seat);
-		PutU32(out, entry.last_click_order_id);
-	}
-	return true;
-}
-
-bool ReadAckEntries(const uint8_t* data, int size, int& off, std::vector<CommsAckEntry>& out) {
-	uint8_t count = 0;
-	if (!ReadU8(data, size, off, count)) {
-		return false;
-	}
-	out.clear();
-	out.reserve(count);
-	for (uint8_t i = 0; i < count; ++i) {
-		CommsAckEntry entry;
-		if (!ReadU8(data, size, off, entry.seat) || !ReadU32(data, size, off, entry.last_click_order_id)) {
-			return false;
-		}
-		out.push_back(entry);
-	}
-	return true;
-}
-
-bool PutCommandBody(std::vector<uint8_t>& out, const CommsOrder& order) {
-	if (order.unit_ids.size() > 64) {
-		return false;
-	}
-	PutU8(out, order.type);
-	PutU8(out, order.is_next ? 1 : 0);
-	PutI32(out, order.target_x);
-	PutI32(out, order.target_y);
-	PutU16(out, static_cast<uint16_t>(order.unit_ids.size()));
-	for (int32_t id : order.unit_ids) {
-		PutI32(out, id);
-	}
-	PutU8(out, order.seat);
-	PutU32(out, order.order_id);
-	PutI32(out, order.actual_tick);
-	PutI32(out, order.hash_tick);
-	PutU64(out, order.state_hash);
-	return true;
-}
-
-bool ReadCommandBody(const uint8_t* data, int size, int& off, CommsOrder& order) {
+bool DecodeUdpOrderBody(const uint8_t* data, int size, int off, CommsOrder& order) {
 	uint8_t type = 0;
 	uint8_t is_next = 0;
 	uint16_t count = 0;
@@ -553,7 +454,7 @@ bool ReadCommandBody(const uint8_t* data, int size, int& off, CommsOrder& order)
 	if (!ReadI32(data, size, off, order.target_x) || !ReadI32(data, size, off, order.target_y)) {
 		return false;
 	}
-	if (!ReadU16(data, size, off, count) || count > 64) {
+	if (!ReadU16(data, size, off, count)) {
 		return false;
 	}
 	order.type = type;
@@ -567,7 +468,7 @@ bool ReadCommandBody(const uint8_t* data, int size, int& off, CommsOrder& order)
 		}
 		order.unit_ids.push_back(id);
 	}
-	if (!ReadU8(data, size, off, order.seat)) {
+	if (!ReadI32(data, size, off, order.sim_player_id)) {
 		return false;
 	}
 	if (!ReadU32(data, size, off, order.order_id)) {
@@ -580,32 +481,6 @@ bool ReadCommandBody(const uint8_t* data, int size, int& off, CommsOrder& order)
 		return false;
 	}
 	return ReadU64(data, size, off, order.state_hash);
-}
-
-bool DecodeUdpOrderBody(const uint8_t* data, int size, int off, CommsOrder& order) {
-	if (!ReadCommandBody(data, size, off, order)) {
-		return false;
-	}
-	if (!ReadAckEntries(data, size, off, order.acks)) {
-		return false;
-	}
-	if (!ReadAckEntries(data, size, off, order.watermarks)) {
-		return false;
-	}
-	uint8_t piggy_count = 0;
-	if (!ReadU8(data, size, off, piggy_count)) {
-		return false;
-	}
-	order.piggybacks.clear();
-	order.piggybacks.reserve(piggy_count);
-	for (uint8_t i = 0; i < piggy_count; ++i) {
-		CommsOrder piggy;
-		if (!ReadCommandBody(data, size, off, piggy)) {
-			return false;
-		}
-		order.piggybacks.push_back(std::move(piggy));
-	}
-	return true;
 }
 
 bool EncodeUdpHello(const std::string& room_id, const std::string& player_id, const std::string& token, std::vector<uint8_t>& out) {
@@ -632,18 +507,19 @@ bool EncodeUdpOrder(
 	if (!PutStr(out, room_id) || !PutStr(out, player_id)) {
 		return false;
 	}
-	if (!PutCommandBody(out, order) || !PutAckEntries(out, order.acks) || !PutAckEntries(out, order.watermarks)) {
-		return false;
+	PutU8(out, order.type);
+	PutU8(out, order.is_next ? 1 : 0);
+	PutI32(out, order.target_x);
+	PutI32(out, order.target_y);
+	PutU16(out, static_cast<uint16_t>(order.unit_ids.size()));
+	for (int32_t id : order.unit_ids) {
+		PutI32(out, id);
 	}
-	if (order.piggybacks.size() > 255) {
-		return false;
-	}
-	PutU8(out, static_cast<uint8_t>(order.piggybacks.size()));
-	for (const CommsOrder& piggy : order.piggybacks) {
-		if (!PutCommandBody(out, piggy)) {
-			return false;
-		}
-	}
+	PutI32(out, order.sim_player_id);
+	PutU32(out, order.order_id);
+	PutI32(out, order.actual_tick);
+	PutI32(out, order.hash_tick);
+	PutU64(out, order.state_hash);
 	return out.size() <= kUdpMaxPacket;
 }
 
@@ -711,7 +587,6 @@ struct CommsClient::Impl {
 	std::queue<std::vector<uint8_t>> udp_out;
 	std::string hello_room;
 	bool hello_acked = false;
-	uint8_t local_seat = 0;
 	RttSampler rtt;
 
 	void Enqueue(CommsRequest request) {
@@ -833,14 +708,9 @@ struct CommsClient::Impl {
 			return;
 		}
 		if (kind == kUdpAck) {
-			uint8_t seat = 0;
-			if (!ReadU8(data, size, off, seat)) {
-				return;
-			}
 			std::lock_guard<std::mutex> lock(udp_mu);
 			if (room_id == hello_room) {
 				hello_acked = true;
-				local_seat = seat;
 			}
 			udp_cv.notify_all();
 			return;
@@ -959,7 +829,6 @@ struct CommsClient::Impl {
 			std::lock_guard<std::mutex> lock(udp_mu);
 			hello_room = room_id;
 			hello_acked = false;
-			local_seat = 0;
 		}
 		for (int attempt = 0; attempt < 20; ++attempt) {
 			{
@@ -1041,12 +910,6 @@ struct CommsClient::Impl {
 			{
 				std::lock_guard<std::mutex> lock(session_mu);
 				joined_room.clear();
-			}
-			{
-				std::lock_guard<std::mutex> lock(udp_mu);
-				local_seat = 0;
-				hello_acked = false;
-				hello_room.clear();
 			}
 			rtt.Stop();
 		}
@@ -1178,11 +1041,8 @@ void CommsClient::SendOrder(CommsOrder order) {
 		return;
 	}
 	std::vector<uint8_t> packet;
-	while (!EncodeUdpOrder(room_id, player_id, order, packet)) {
-		if (order.piggybacks.empty()) {
-			return;
-		}
-		order.piggybacks.pop_back();
+	if (!EncodeUdpOrder(room_id, player_id, order, packet)) {
+		return;
 	}
 	impl_->QueueUdp(std::move(packet));
 }
@@ -1210,11 +1070,6 @@ std::string CommsClient::PlayerId() const {
 std::string CommsClient::Nickname() const {
 	std::lock_guard<std::mutex> lock(impl_->session_mu);
 	return impl_->session.nickname;
-}
-
-uint8_t CommsClient::Seat() const {
-	std::lock_guard<std::mutex> lock(impl_->udp_mu);
-	return impl_->local_seat;
 }
 
 int CommsClient::MinRttMs() const {

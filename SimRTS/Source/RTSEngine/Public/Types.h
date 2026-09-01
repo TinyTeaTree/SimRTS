@@ -6,7 +6,7 @@ namespace SimRTS {
 
 using Tick = int32_t;
 using UnitId = int32_t;
-using PlayerId = uint8_t;
+using PlayerId = int32_t;
 
 struct Vec2i {
     int32_t x = 0;

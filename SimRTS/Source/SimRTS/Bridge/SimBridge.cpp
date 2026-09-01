@@ -55,7 +55,7 @@ void FSimBridge::SubmitMoveOrder(
 	int32 TargetX,
 	int32 TargetY,
 	bool bIsNext,
-	uint8 PlayerId)
+	int32 PlayerId)
 {
 	SimRTS::Order Order;
 	Order.player_id = PlayerId;
@@ -75,7 +75,7 @@ void FSimBridge::SubmitScheduledMoveOrder(
 	int32 TargetX,
 	int32 TargetY,
 	bool bIsNext,
-	uint8 PlayerId,
+	int32 PlayerId,
 	uint32 OrderId,
 	int32 ScheduledTick)
 {
