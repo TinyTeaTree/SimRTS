@@ -113,7 +113,7 @@ func TestStartRoomRequiresSeat(t *testing.T) {
 		t.Fatalf("StartRoom unseated: %d %s", startRec.Code, startRec.Body.String())
 	}
 
-	if _, err := rooms.Seat("alpha", session.PlayerID, nil); err != nil {
+	if _, _, err := rooms.Seat("alpha", session.PlayerID, nil); err != nil {
 		t.Fatal(err)
 	}
 	startRec2 := httptest.NewRecorder()
@@ -123,5 +123,15 @@ func TestStartRoomRequiresSeat(t *testing.T) {
 	handler.ServeHTTP(startRec2, startReq2)
 	if startRec2.Code != http.StatusOK {
 		t.Fatalf("StartRoom seated: %d %s", startRec2.Code, startRec2.Body.String())
+	}
+	var started Room
+	if err := json.Unmarshal(startRec2.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	if len(started.PlayerIDs) != 1 || started.PlayerIDs[0] != session.PlayerID {
+		t.Fatalf("start roster %#v", started.PlayerIDs)
+	}
+	if len(started.Seats) != 1 || started.Seats[0] != 0 {
+		t.Fatalf("start seats %#v", started.Seats)
 	}
 }

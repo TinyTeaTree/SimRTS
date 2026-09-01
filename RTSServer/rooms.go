@@ -11,11 +11,13 @@ import (
 const (
 	kickoffDuration = 1000 * time.Millisecond
 	kickoffRepeat   = 100 * time.Millisecond
+	clickKeep       = 10 * time.Second
 )
 
 type Room struct {
 	ID        string   `json:"id"`
 	PlayerIDs []string `json:"player_ids"`
+	Seats     []uint8  `json:"seats"`
 }
 
 type kickoffState struct {
@@ -24,11 +26,22 @@ type kickoffState struct {
 	Acked    map[string]bool
 }
 
+type cachedClick struct {
+	Seat     byte
+	OrderID  uint32
+	Body     []byte
+	Deadline time.Time
+}
+
 type storedRoom struct {
 	ID            string
 	PlayerIDs     []string
+	Seats         map[string]byte
+	nextSeat      uint16
 	Addrs         map[string]*net.UDPAddr
 	Ready         map[string]struct{}
+	Acks          map[string]map[byte]uint32
+	Clicks        []cachedClick
 	Kickoff       *kickoffState
 	nextKickoffID uint32
 }
@@ -38,6 +51,11 @@ type KickoffBroadcast struct {
 	KickoffID   uint32
 	RemainingMs uint32
 	Addrs       []*net.UDPAddr
+}
+
+type destBounce struct {
+	Addr   *net.UDPAddr
+	Packet []byte
 }
 
 type RoomStore struct {
@@ -71,8 +89,10 @@ func (s *RoomStore) Create(id string) (Room, error) {
 	room := &storedRoom{
 		ID:        id,
 		PlayerIDs: []string{},
+		Seats:     map[string]byte{},
 		Addrs:     map[string]*net.UDPAddr{},
 		Ready:     map[string]struct{}{},
+		Acks:      map[string]map[byte]uint32{},
 	}
 	s.rooms[id] = room
 	return snapshotRoom(room), nil
@@ -100,37 +120,29 @@ func (s *RoomStore) IsSeated(roomID, playerID string) bool {
 }
 
 // Seat adds the player on first UDP Hello and maps their datagram address.
-func (s *RoomStore) Seat(roomID, playerID string, addr *net.UDPAddr) (Room, error) {
+// Join order is 0, 1, 2, … and is never reused in that room.
+func (s *RoomStore) Seat(roomID, playerID string, addr *net.UDPAddr) (Room, byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	room, ok := s.rooms[roomID]
 	if !ok {
-		return Room{}, fmt.Errorf("room not found")
+		return Room{}, 0, fmt.Errorf("room not found")
 	}
 	if !contains(room.PlayerIDs, playerID) {
+		if room.nextSeat >= 255 {
+			return Room{}, 0, fmt.Errorf("room full")
+		}
+		seat := byte(room.nextSeat)
+		room.nextSeat++
 		room.PlayerIDs = append(room.PlayerIDs, playerID)
-		sort.Strings(room.PlayerIDs)
+		room.Seats[playerID] = seat
 	}
 	if addr != nil {
 		copied := *addr
 		room.Addrs[playerID] = &copied
 	}
-	return snapshotRoom(room), nil
-}
-
-func (s *RoomStore) RelayAddrs(roomID, senderID string) ([]*net.UDPAddr, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	room, ok := s.rooms[roomID]
-	if !ok {
-		return nil, fmt.Errorf("room not found")
-	}
-	if !contains(room.PlayerIDs, senderID) {
-		return nil, fmt.Errorf("player not in room")
-	}
-	return copyAddrs(room), nil
+	return snapshotRoom(room), room.Seats[playerID], nil
 }
 
 func (s *RoomStore) MarkStart(roomID, playerID string) (Room, error) {
@@ -221,6 +233,7 @@ func (s *RoomStore) Leave(roomID, playerID string) (Room, error) {
 	room.PlayerIDs = next
 	delete(room.Addrs, playerID)
 	delete(room.Ready, playerID)
+	delete(room.Acks, playerID)
 	if room.Kickoff != nil {
 		delete(room.Kickoff.Acked, playerID)
 		if len(room.PlayerIDs) == 0 {
@@ -230,10 +243,56 @@ func (s *RoomStore) Leave(roomID, playerID string) (Room, error) {
 	return snapshotRoom(room), nil
 }
 
+func (s *RoomStore) PrepareOrderBounces(roomID, senderID string, prefix []byte, cmd orderCommand, acks []ackEntry, piggybacks [][]byte) ([]destBounce, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room, ok := s.rooms[roomID]
+	if !ok {
+		return nil, fmt.Errorf("room not found")
+	}
+	if !contains(room.PlayerIDs, senderID) {
+		return nil, fmt.Errorf("player not in room")
+	}
+
+	now := time.Now()
+	pruneClicks(room, now)
+	recordAcks(room, senderID, acks)
+	if len(cmd.UnitIDs) > 0 {
+		cacheClick(room, cmd.Seat, cmd.OrderID, cmd.Body, now)
+	}
+	for _, body := range piggybacks {
+		pb, _, err := parseCommandBody(body, 0)
+		if err != nil || len(pb.UnitIDs) == 0 {
+			continue
+		}
+		cacheClick(room, pb.Seat, pb.OrderID, pb.Body, now)
+	}
+
+	out := make([]destBounce, 0, len(room.PlayerIDs))
+	for _, destID := range room.PlayerIDs {
+		addr := room.Addrs[destID]
+		if addr == nil {
+			continue
+		}
+		copied := *addr
+		packet, err := encodeDestBounce(room, destID, prefix, cmd, now)
+		if err != nil {
+			continue
+		}
+		out = append(out, destBounce{Addr: &copied, Packet: packet})
+	}
+	return out, nil
+}
+
 func snapshotRoom(room *storedRoom) Room {
 	players := make([]string, len(room.PlayerIDs))
 	copy(players, room.PlayerIDs)
-	return Room{ID: room.ID, PlayerIDs: players}
+	seats := make([]uint8, len(room.PlayerIDs))
+	for i, id := range room.PlayerIDs {
+		seats[i] = room.Seats[id]
+	}
+	return Room{ID: room.ID, PlayerIDs: players, Seats: seats}
 }
 
 func copyAddrs(room *storedRoom) []*net.UDPAddr {
@@ -279,4 +338,119 @@ func contains(ids []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func recordAcks(room *storedRoom, senderID string, acks []ackEntry) {
+	row := room.Acks[senderID]
+	if row == nil {
+		row = map[byte]uint32{}
+		room.Acks[senderID] = row
+	}
+	for _, ack := range acks {
+		row[ack.Seat] = ack.Last
+	}
+}
+
+func cacheClick(room *storedRoom, seat byte, orderID uint32, body []byte, now time.Time) {
+	copied := append([]byte(nil), body...)
+	for i := range room.Clicks {
+		if room.Clicks[i].Seat == seat && room.Clicks[i].OrderID == orderID {
+			room.Clicks[i].Body = copied
+			room.Clicks[i].Deadline = now.Add(clickKeep)
+			return
+		}
+	}
+	room.Clicks = append(room.Clicks, cachedClick{
+		Seat:     seat,
+		OrderID:  orderID,
+		Body:     copied,
+		Deadline: now.Add(clickKeep),
+	})
+}
+
+func pruneClicks(room *storedRoom, now time.Time) {
+	kept := room.Clicks[:0]
+	for _, click := range room.Clicks {
+		if click.Deadline.After(now) {
+			kept = append(kept, click)
+		}
+	}
+	room.Clicks = kept
+}
+
+func lastAck(room *storedRoom, playerID string, originator byte) uint32 {
+	row := room.Acks[playerID]
+	if row == nil {
+		return 0
+	}
+	return row[originator]
+}
+
+func fullyAcked(room *storedRoom, destID string, originator byte) uint32 {
+	var minVal uint32
+	found := false
+	for _, id := range room.PlayerIDs {
+		if id == destID {
+			continue
+		}
+		v := lastAck(room, id, originator)
+		if !found || v < minVal {
+			minVal = v
+			found = true
+		}
+	}
+	if !found {
+		return lastAck(room, destID, originator)
+	}
+	return minVal
+}
+
+func encodeDestBounce(room *storedRoom, destID string, prefix []byte, cmd orderCommand, now time.Time) ([]byte, error) {
+	destSeat := room.Seats[destID]
+	buf := append([]byte(nil), prefix...)
+	buf = append(buf, byte(len(room.PlayerIDs)))
+	for _, id := range room.PlayerIDs {
+		originator := room.Seats[id]
+		buf = append(buf, originator)
+		buf = appendU32(buf, fullyAcked(room, destID, originator))
+	}
+
+	var piggy [][]byte
+	for _, click := range room.Clicks {
+		if !click.Deadline.After(now) {
+			continue
+		}
+		if click.Seat == destSeat {
+			continue
+		}
+		if len(cmd.UnitIDs) > 0 && click.Seat == cmd.Seat && click.OrderID == cmd.OrderID {
+			continue
+		}
+		if lastAck(room, destID, click.Seat) >= click.OrderID {
+			continue
+		}
+		if len(buf)+1+len(click.Body)+piggySize(piggy) > udpMaxPacket {
+			continue
+		}
+		piggy = append(piggy, click.Body)
+	}
+	if len(piggy) > 255 {
+		piggy = piggy[:255]
+	}
+	buf = append(buf, byte(len(piggy)))
+	for _, body := range piggy {
+		buf = append(buf, body...)
+	}
+	if len(buf) > udpMaxPacket {
+		return nil, fmt.Errorf("bounce too large")
+	}
+	return buf, nil
+}
+
+func piggySize(bodies [][]byte) int {
+	n := 0
+	for _, body := range bodies {
+		n += len(body)
+	}
+	return n
 }

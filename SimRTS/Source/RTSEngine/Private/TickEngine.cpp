@@ -554,7 +554,7 @@ uint64_t TickEngine::GameplayHash() const {
 
     mix32(static_cast<uint32_t>(state_.orders.size()));
     for (const Order& order : state_.orders) {
-        mix_i32(order.player_id);
+        mix8(order.player_id);
         mix32(static_cast<uint32_t>(order.unit_ids.size()));
         for (UnitId id : order.unit_ids) {
             mix_i32(id);

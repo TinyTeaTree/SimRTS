@@ -10,6 +10,7 @@
 #include "UnitViewManager.h"
 #include "Engine/World.h"
 #include "GameFramework/DefaultPawn.h"
+#include "HAL/PlatformTime.h"
 #include "TimerManager.h"
 
 namespace {
@@ -34,47 +35,6 @@ FSimRTSCommsRoomView MakeRoomView(const SimRTS::CommsRoom& Room)
 		View.PlayerIds.Add(CommsToFString(PlayerId));
 	}
 	return View;
-}
-
-int32 SimPlayerIdFromLogin(const std::string& Id)
-{
-	uint32 Hash = 2166136261u;
-	for (unsigned char Character : Id)
-	{
-		Hash ^= Character;
-		Hash *= 16777619u;
-	}
-	const int32 Value = static_cast<int32>(Hash);
-	return Value == 0 ? 1 : Value;
-}
-
-void RelayMoveOrder(
-	SimRTS::CommsClient& Comms,
-	const TArray<int32>& UnitIds,
-	int32 TargetX,
-	int32 TargetY,
-	bool bIsNext,
-	uint32 OrderId,
-	int32 ActualTick,
-	int32 HashTick,
-	uint64 StateHash)
-{
-	SimRTS::CommsOrder Order;
-	Order.sim_player_id = SimPlayerIdFromLogin(Comms.PlayerId());
-	Order.order_id = OrderId;
-	Order.actual_tick = ActualTick;
-	Order.hash_tick = HashTick;
-	Order.state_hash = StateHash;
-	Order.target_x = TargetX;
-	Order.target_y = TargetY;
-	Order.type = 0;
-	Order.is_next = bIsNext;
-	Order.unit_ids.reserve(UnitIds.Num());
-	for (int32 Id : UnitIds)
-	{
-		Order.unit_ids.push_back(Id);
-	}
-	Comms.SendOrder(std::move(Order));
 }
 
 } // namespace
@@ -109,17 +69,19 @@ void ASimRTSGameMode::BeginPlay()
 	{
 		FutureTickDistance = Networking.Config.FutureTickDistance;
 		MinTickDelaySeconds = Networking.Config.PacerMinDelayMs / 1000.f;
+		ClickKeepMs = Networking.Config.ClickKeepMs;
 		Comms.SetHost(FStringToComms(Networking.Config.Ip), Networking.Config.Port, Networking.Config.UdpPort);
 		Comms.SetPingConfig(Networking.Config.PingIntervalMs, Networking.Config.PingKeepAmount);
 		Comms.Start();
-		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d udp=%d future_tick_distance=%d ping=%dms keep=%d pacer_min_delay=%dms"),
+		UE_LOG(LogTemp, Log, TEXT("SimRTS comms %s:%d udp=%d future_tick_distance=%d ping=%dms keep=%d pacer_min_delay=%dms click_keep=%dms"),
 			*Networking.Config.Ip,
 			Networking.Config.Port,
 			Networking.Config.UdpPort,
 			FutureTickDistance,
 			Networking.Config.PingIntervalMs,
 			Networking.Config.PingKeepAmount,
-			Networking.Config.PacerMinDelayMs);
+			Networking.Config.PacerMinDelayMs,
+			ClickKeepMs);
 	}
 
 	if (UUnitViewManager* ViewManager = GetUnitViewManager())
@@ -269,8 +231,8 @@ void ASimRTSGameMode::SubmitMoveOrder(const TArray<int32>& UnitIds, int32 Target
 	LatestOrderHash(HashTick, StateHash);
 	const uint32 OrderId = NextOrderId++;
 	LastClickOrderId = OrderId;
-	RelayMoveOrder(Comms, UnitIds, TargetX, TargetY, bIsNext, OrderId, ActualTick, HashTick, StateHash);
-	NoteCommandFrame(SimPlayerIdFromLogin(Comms.PlayerId()), ActualTick, OrderId, true);
+	SendRelayOrder(UnitIds, TargetX, TargetY, bIsNext, OrderId, ActualTick, HashTick, StateHash);
+	NoteCommandFrame(Comms.Seat(), ActualTick, OrderId, true);
 }
 
 bool ASimRTSGameMode::IsMatchmakingLoggedIn() const
@@ -332,19 +294,208 @@ void ASimRTSGameMode::ResetHashHistory()
 	CommandFramesByPlayer.Reset();
 	LockTrackByPlayer.Reset();
 	LastClickOrderId = 0;
+	FullyAckedLocal = 0;
 	NextOrderId = 1;
+	KeptClicks.Reset();
 }
 
-void ASimRTSGameMode::SnapshotSeatedPlayers(const std::vector<std::string>& PlayerIds)
+void ASimRTSGameMode::SnapshotSeatedPlayers(const SimRTS::CommsRoom& CommsRoom)
 {
 	SeatedSimPlayerIds.Reset();
-	SeatedSimPlayerIds.Reserve(static_cast<int32>(PlayerIds.size()));
-	for (const std::string& PlayerId : PlayerIds)
+	SeatedSimPlayerIds.Reserve(static_cast<int32>(CommsRoom.seats.size()));
+	for (uint8_t Seat : CommsRoom.seats)
 	{
-		SeatedSimPlayerIds.Add(SimPlayerIdFromLogin(PlayerId));
+		SeatedSimPlayerIds.Add(Seat);
 	}
-	SeatedSimPlayerIds.Sort();
 	UE_LOG(LogTemp, Log, TEXT("SimRTS seated set count=%d"), SeatedSimPlayerIds.Num());
+}
+
+void ASimRTSGameMode::PruneKeptClicks()
+{
+	const double Now = FPlatformTime::Seconds();
+	KeptClicks.RemoveAll([this, Now](const FSimRTSKeptClick& Click)
+	{
+		return Click.ExpireAt <= Now || Click.OrderId <= FullyAckedLocal;
+	});
+}
+
+void ASimRTSGameMode::ApplyWatermarks(const SimRTS::CommsOrder& Order)
+{
+	const uint8 LocalSeat = Comms.Seat();
+	for (const SimRTS::CommsAckEntry& Entry : Order.watermarks)
+	{
+		if (Entry.seat == LocalSeat && Entry.last_click_order_id > FullyAckedLocal)
+		{
+			FullyAckedLocal = Entry.last_click_order_id;
+		}
+	}
+	PruneKeptClicks();
+}
+
+void ASimRTSGameMode::AppendUnackedClicks(SimRTS::CommsOrder& Order) const
+{
+	const double Now = FPlatformTime::Seconds();
+	for (const FSimRTSKeptClick& Click : KeptClicks)
+	{
+		if (Click.ExpireAt <= Now || Click.OrderId <= FullyAckedLocal)
+		{
+			continue;
+		}
+		if (!Order.unit_ids.empty() && Click.OrderId == Order.order_id && Click.Seat == Order.seat)
+		{
+			continue;
+		}
+		SimRTS::CommsOrder Piggy;
+		Piggy.seat = Click.Seat;
+		Piggy.order_id = Click.OrderId;
+		Piggy.actual_tick = Click.ActualTick;
+		Piggy.hash_tick = Click.HashTick;
+		Piggy.state_hash = Click.StateHash;
+		Piggy.target_x = Click.TargetX;
+		Piggy.target_y = Click.TargetY;
+		Piggy.type = Click.Type;
+		Piggy.is_next = Click.bIsNext;
+		Piggy.unit_ids.reserve(Click.UnitIds.Num());
+		for (int32 Id : Click.UnitIds)
+		{
+			Piggy.unit_ids.push_back(Id);
+		}
+		Order.piggybacks.push_back(std::move(Piggy));
+	}
+}
+
+void ASimRTSGameMode::RememberClick(const SimRTS::CommsOrder& Order)
+{
+	if (Order.unit_ids.empty())
+	{
+		return;
+	}
+
+	FSimRTSKeptClick Kept;
+	Kept.Seat = Order.seat;
+	Kept.OrderId = Order.order_id;
+	Kept.ActualTick = Order.actual_tick;
+	Kept.HashTick = Order.hash_tick;
+	Kept.StateHash = Order.state_hash;
+	Kept.TargetX = Order.target_x;
+	Kept.TargetY = Order.target_y;
+	Kept.Type = Order.type;
+	Kept.bIsNext = Order.is_next;
+	Kept.UnitIds.Reserve(static_cast<int32>(Order.unit_ids.size()));
+	for (int32_t Id : Order.unit_ids)
+	{
+		Kept.UnitIds.Add(Id);
+	}
+	Kept.ExpireAt = FPlatformTime::Seconds() + ClickKeepMs / 1000.0;
+	KeptClicks.Add(std::move(Kept));
+}
+
+void ASimRTSGameMode::SendRelayOrder(
+	const TArray<int32>& UnitIds,
+	int32 TargetX,
+	int32 TargetY,
+	bool bIsNext,
+	uint32 OrderId,
+	int32 ActualTick,
+	int32 HashTick,
+	uint64 StateHash)
+{
+	PruneKeptClicks();
+
+	SimRTS::CommsOrder Order;
+	Order.seat = Comms.Seat();
+	Order.order_id = OrderId;
+	Order.actual_tick = ActualTick;
+	Order.hash_tick = HashTick;
+	Order.state_hash = StateHash;
+	Order.target_x = TargetX;
+	Order.target_y = TargetY;
+	Order.type = 0;
+	Order.is_next = bIsNext;
+	Order.unit_ids.reserve(UnitIds.Num());
+	for (int32 Id : UnitIds)
+	{
+		Order.unit_ids.push_back(Id);
+	}
+
+	Order.acks.reserve(SeatedSimPlayerIds.Num());
+	const uint8 LocalSeat = Comms.Seat();
+	for (const int32 Seat : SeatedSimPlayerIds)
+	{
+		SimRTS::CommsAckEntry Entry;
+		Entry.seat = static_cast<uint8_t>(Seat);
+		if (Seat == LocalSeat)
+		{
+			Entry.last_click_order_id = LastClickOrderId;
+		}
+		else if (const FSimRTSLockTrack* Track = LockTrackByPlayer.Find(Seat))
+		{
+			Entry.last_click_order_id = Track->LastClickOrderId;
+		}
+		Order.acks.push_back(Entry);
+	}
+
+	if (!UnitIds.IsEmpty())
+	{
+		RememberClick(Order);
+	}
+	AppendUnackedClicks(Order);
+	Comms.SendOrder(std::move(Order));
+}
+
+void ASimRTSGameMode::ApplyReceivedCommand(const SimRTS::CommsOrder& Order)
+{
+	TArray<int32> UnitIds;
+	UnitIds.Reserve(static_cast<int32>(Order.unit_ids.size()));
+	for (int32_t Id : Order.unit_ids)
+	{
+		UnitIds.Add(Id);
+	}
+	NoteCommandFrame(
+		Order.seat,
+		Order.actual_tick,
+		Order.order_id,
+		UnitIds.Num() > 0);
+	{
+		const int32 Tick = GetBridge().GetTick();
+		const int32 NeededActualTick = Tick >= FutureTickDistance ? Tick - FutureTickDistance : -1;
+		const uint8 LocalSeat = Comms.Seat();
+		UE_LOG(LogTemp, Warning, TEXT("SimRTS recv gettick=%d at=%d order=%u player=%d actual=%d units=%d need_at=%d local=%d have=%d"),
+			Tick,
+			GetActualTick(),
+			Order.order_id,
+			Order.seat,
+			Order.actual_tick,
+			UnitIds.Num(),
+			NeededActualTick,
+			Order.seat == LocalSeat ? 1 : 0,
+			HasAllCommandsForSimTick() ? 1 : 0);
+	}
+	if (UnitIds.Num() > 0)
+	{
+		const int32 ScheduledTick = Order.actual_tick + FutureTickDistance;
+		if (ScheduledTick < GetBridge().GetTick())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SimRTS late order id=%u actual=%d scheduled=%d sim=%d"),
+				Order.order_id,
+				Order.actual_tick,
+				ScheduledTick,
+				GetBridge().GetTick());
+		}
+		GetBridge().SubmitScheduledMoveOrder(
+			UnitIds,
+			Order.target_x,
+			Order.target_y,
+			Order.is_next,
+			Order.seat,
+			Order.order_id,
+			ScheduledTick);
+	}
+	const uint8 LocalSeat = Comms.Seat();
+	if (Order.seat != LocalSeat)
+	{
+		ComparePeerHash(Order.hash_tick, Order.state_hash);
+	}
 }
 
 void ASimRTSGameMode::NoteCommandFrame(int32 SimPlayerId, int32 ActualTick, uint32 OrderId, bool bClick)
@@ -522,8 +673,8 @@ void ASimRTSGameMode::MaybeSendEmptyOrders()
 			continue;
 		}
 
-		RelayMoveOrder(Comms, TArray<int32>(), 0, 0, false, LastClickOrderId, At, HashTick, StateHash);
-		NoteCommandFrame(SimPlayerIdFromLogin(Comms.PlayerId()), At, LastClickOrderId, false);
+		SendRelayOrder(TArray<int32>(), 0, 0, false, LastClickOrderId, At, HashTick, StateHash);
+		NoteCommandFrame(Comms.Seat(), At, LastClickOrderId, false);
 		LastCoveredActualTick = At;
 	}
 }
@@ -695,57 +846,12 @@ void ASimRTSGameMode::PumpComms()
 		{
 			if (Event.result.ok && IsRoomLoaded())
 			{
-				TArray<int32> UnitIds;
-				UnitIds.Reserve(static_cast<int32>(Event.result.order.unit_ids.size()));
-				for (int32_t Id : Event.result.order.unit_ids)
+				for (const SimRTS::CommsOrder& Piggy : Event.result.order.piggybacks)
 				{
-					UnitIds.Add(Id);
+					ApplyReceivedCommand(Piggy);
 				}
-				NoteCommandFrame(
-					Event.result.order.sim_player_id,
-					Event.result.order.actual_tick,
-					Event.result.order.order_id,
-					UnitIds.Num() > 0);
-				{
-					const int32 Tick = GetBridge().GetTick();
-					const int32 NeededActualTick = Tick >= FutureTickDistance ? Tick - FutureTickDistance : -1;
-					const int32 LocalPlayer = SimPlayerIdFromLogin(Comms.PlayerId());
-					UE_LOG(LogTemp, Warning, TEXT("SimRTS recv gettick=%d at=%d order=%u player=%d actual=%d units=%d need_at=%d local=%d have=%d"),
-						Tick,
-						GetActualTick(),
-						Event.result.order.order_id,
-						Event.result.order.sim_player_id,
-						Event.result.order.actual_tick,
-						UnitIds.Num(),
-						NeededActualTick,
-						Event.result.order.sim_player_id == LocalPlayer ? 1 : 0,
-						HasAllCommandsForSimTick() ? 1 : 0);
-				}
-				if (UnitIds.Num() > 0)
-				{
-					const int32 ScheduledTick = Event.result.order.actual_tick + FutureTickDistance;
-					if (ScheduledTick < GetBridge().GetTick())
-					{
-						UE_LOG(LogTemp, Warning, TEXT("SimRTS late order id=%u actual=%d scheduled=%d sim=%d"),
-							Event.result.order.order_id,
-							Event.result.order.actual_tick,
-							ScheduledTick,
-							GetBridge().GetTick());
-					}
-					GetBridge().SubmitScheduledMoveOrder(
-						UnitIds,
-						Event.result.order.target_x,
-						Event.result.order.target_y,
-						Event.result.order.is_next,
-						Event.result.order.sim_player_id,
-						Event.result.order.order_id,
-						ScheduledTick);
-				}
-				const int32 LocalPlayer = SimPlayerIdFromLogin(Comms.PlayerId());
-				if (Event.result.order.sim_player_id != LocalPlayer)
-				{
-					ComparePeerHash(Event.result.order.hash_tick, Event.result.order.state_hash);
-				}
+				ApplyReceivedCommand(Event.result.order);
+				ApplyWatermarks(Event.result.order);
 			}
 			continue;
 		}
@@ -770,7 +876,7 @@ void ASimRTSGameMode::PumpComms()
 		}
 		else if (Event.kind == SimRTS::CommsEventKind::StartRoom && Event.result.ok)
 		{
-			SnapshotSeatedPlayers(Event.result.room.player_ids);
+			SnapshotSeatedPlayers(Event.result.room);
 		}
 		else if (Event.kind == SimRTS::CommsEventKind::LeaveRoom && Event.result.ok)
 		{

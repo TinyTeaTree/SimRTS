@@ -3,6 +3,7 @@
 #include "RTSCommsAPI.h"
 #include "CommsTypes.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -37,6 +38,7 @@ public:
 	std::string SessionToken() const;
 	std::string PlayerId() const;
 	std::string Nickname() const;
+	uint8_t Seat() const;
 	int MinRttMs() const;
 
 private:

@@ -28,6 +28,21 @@ struct FSimRTSLockTrack
 	TArray<FSimRTSRetroFrame> Bag;
 };
 
+struct FSimRTSKeptClick
+{
+	uint8 Seat = 0;
+	uint32 OrderId = 0;
+	int32 ActualTick = 0;
+	int32 HashTick = 0;
+	uint64 StateHash = 0;
+	int32 TargetX = 0;
+	int32 TargetY = 0;
+	uint8 Type = 0;
+	bool bIsNext = false;
+	TArray<int32> UnitIds;
+	double ExpireAt = 0.0;
+};
+
 UCLASS()
 class SIMRTS_API ASimRTSGameMode : public AGameModeBase
 {
@@ -130,9 +145,15 @@ private:
 	void HandleKickoff(uint32 KickoffId, int32 RemainingMs);
 	void ArmSimClock();
 	void ResetHashHistory();
-	void SnapshotSeatedPlayers(const std::vector<std::string>& PlayerIds);
+	void SnapshotSeatedPlayers(const SimRTS::CommsRoom& CommsRoom);
 	void NoteCommandFrame(int32 SimPlayerId, int32 ActualTick, uint32 OrderId, bool bClick);
 	void ApplyRetroactiveEmpties(int32 SimPlayerId);
+	void ApplyReceivedCommand(const SimRTS::CommsOrder& Order);
+	void SendRelayOrder(const TArray<int32>& UnitIds, int32 TargetX, int32 TargetY, bool bIsNext, uint32 OrderId, int32 ActualTick, int32 HashTick, uint64 StateHash);
+	void AppendUnackedClicks(SimRTS::CommsOrder& Order) const;
+	void RememberClick(const SimRTS::CommsOrder& Order);
+	void PruneKeptClicks();
+	void ApplyWatermarks(const SimRTS::CommsOrder& Order);
 	void PruneCommandFrames();
 	void LatestOrderHash(int32& OutHashTick, uint64& OutStateHash) const;
 	void ComparePeerHash(int32 HashTick, uint64 StateHash);
@@ -148,11 +169,14 @@ private:
 	SimRTS::CommsClient Comms;
 	int32 FutureTickDistance = 5;
 	float MinTickDelaySeconds = 0.01f;
+	int32 ClickKeepMs = 10000;
 	uint32 NextOrderId = 1;
 	uint32 LastClickOrderId = 0;
+	uint32 FullyAckedLocal = 0;
 	int32 LastCoveredActualTick = -1;
 	TSet<int32> ActualTicksWithClicks;
 	TArray<int32> SeatedSimPlayerIds;
+	TArray<FSimRTSKeptClick> KeptClicks;
 	TMap<int32, TSet<int32>> CommandFramesByPlayer;
 	TMap<int32, FSimRTSLockTrack> LockTrackByPlayer;
 	FString JoinedMatchmakingRoomId;

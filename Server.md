@@ -61,7 +61,7 @@ X-Session-Token: <session_token>
 | POST | `/LeaveRoom` | token | `{"id":"alpha"}` |
 | POST | `/StartRoom` | token | `{"id":"alpha"}` |
 
-Login returns `{ "session_token", "player_id", "nickname" }` (`nickname` = username). Each login is a new anonymous player. HTTP Join does not add the player to `player_ids`. `StartRoom` marks the session player ready; 404 if they are not seated (UDP Hello). Duplicate Start is 200. The response is the room `{ "id", "player_ids" }` of everyone seated at that call. When every seated player has started, the server broadcasts UDP Kickoff. Duplicate create → `409`. Missing room or player not in room → `404`. Missing/bad token → `401`.
+Login returns `{ "session_token", "player_id", "nickname" }` (`nickname` = username). Each login is a new anonymous player. HTTP Join does not add the player to `player_ids`. `StartRoom` marks the session player ready; 404 if they are not seated (UDP Hello). Duplicate Start is 200. The response is the room `{ "id", "player_ids", "seats" }` of everyone seated at that call. `player_ids` stay login strings for the lobby; `seats` is the aligned join-order `u8` (0, 1, 2, …, never reused in that room). When every seated player has started, the server broadcasts UDP Kickoff. Duplicate create → `409`. Missing room or player not in room → `404`. Missing/bad token → `401`.
 
 ## UDP relay (`:8081`)
 
@@ -69,9 +69,9 @@ One server socket. Clients bind an ephemeral port and `sendto` the host.
 
 | Kind | When |
 |---|---|
-| Hello | After HTTP Join. Body: room id, player id, session token. Server seats the player, maps the datagram address, Acks. |
-| Ack | Reply to Hello. Client treats Join as complete only after this. |
-| Order | Move command. Body includes sim ids, actual_tick, and a `(hash_tick, state_hash)` pair of committed BattleState. Server rebroadcasts the same datagram to every seated member, including the sender, and does not parse the body. |
+| Hello | After HTTP Join. Body: room id, player id, session token. Server seats the player (join-order `u8`), maps the datagram address, Acks with that seat. |
+| Ack | Reply to Hello. Body: `u8 seat`. Client treats Join as complete only after this and stores the seat. |
+| Order | Move command. Body includes originator `u8 seat`, actual_tick, a `(hash_tick, state_hash)` pair, an ack vector, and optional piggybacked clicks. Server parses the trailer, caches clicks, and writes a per-recipient bounce (fully-acked watermarks + missing clicks). |
 | Ping | After Join. Body: seq. Server echoes Pong to the sender only (not the room). |
 | Pong | Reply to Ping. Same seq. Client measures RTT on the I/O thread. |
 | Kickoff | After all seated players HTTP Start. Body: kickoff id, remaining_ms from first send. Repeated until KickoffAck from everyone or remaining hits 0. |
@@ -105,15 +105,15 @@ curl -sS http://127.0.0.1:8080/GetRooms \
 curl -sS -X POST http://127.0.0.1:8080/CreateRoom \
   -H 'Content-Type: application/json' \
   -H "X-Session-Token: $TOKEN" \
-  -d '{"id":"alpha"}'
-# {"id":"alpha","player_ids":[]}
+	-d '{"id":"alpha"}'
+# {"id":"alpha","player_ids":[],"seats":[]}
 
 curl -sS -X POST http://127.0.0.1:8080/JoinRoom \
   -H 'Content-Type: application/json' \
   -H "X-Session-Token: $TOKEN" \
   -d '{"id":"alpha"}'
-# {"id":"alpha","player_ids":[]}
-# HTTP Join authorizes only; player_ids fill after UDP Hello
+# {"id":"alpha","player_ids":[],"seats":[]}
+# HTTP Join authorizes only; player_ids/seats fill after UDP Hello
 
 # after UDP Hello seats the player:
 curl -sS -X POST http://127.0.0.1:8080/StartRoom \
@@ -137,7 +137,7 @@ curl -sS -X POST http://127.0.0.1:8080/JoinRoom \
 
 curl -sS http://127.0.0.1:8080/GetRooms \
   -H "X-Session-Token: $TOKEN"
-# {"rooms":[{"id":"alpha","player_ids":["p_...","p_..."]}]}
+# {"rooms":[{"id":"alpha","player_ids":["p_...","p_..."],"seats":[0,1]}]}
 ```
 
 (`player_ids` are generated ids, not the usernames.)

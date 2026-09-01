@@ -103,6 +103,19 @@ FNetworkingLoadResult NetworkingLoader::ParseJsonString(const FString& JsonText)
 		return Result;
 	}
 
+	double ClickKeepNumber = 0.0;
+	if (!Root->TryGetNumberField(TEXT("click_keep_ms"), ClickKeepNumber))
+	{
+		Result.Error = TEXT("networking: missing click_keep_ms");
+		return Result;
+	}
+	const int32 ClickKeepMs = static_cast<int32>(ClickKeepNumber);
+	if (ClickKeepMs < 1)
+	{
+		Result.Error = TEXT("networking: click_keep_ms must be >= 1");
+		return Result;
+	}
+
 	Result.Config.Ip = Ip;
 	Result.Config.Port = Port;
 	Result.Config.UdpPort = UdpPort;
@@ -110,6 +123,7 @@ FNetworkingLoadResult NetworkingLoader::ParseJsonString(const FString& JsonText)
 	Result.Config.PingIntervalMs = PingIntervalMs;
 	Result.Config.PingKeepAmount = PingKeepAmount;
 	Result.Config.PacerMinDelayMs = PacerMinDelayMs;
+	Result.Config.ClickKeepMs = ClickKeepMs;
 	Result.bSuccess = true;
 	return Result;
 }
